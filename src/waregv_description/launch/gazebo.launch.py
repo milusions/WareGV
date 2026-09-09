@@ -73,5 +73,19 @@ def generate_launch_description():
         arguments=["velocity_controller", "--controller-manager", "/controller_manager"],
         output="screen",
     )
+    
+    joystick_node = Node(
+        package="joy",
+        executable="joy_node",
+       
+        output="screen",
+    )
+    
+    waregv_controller = Node(
+        package="waregv_controller",
+        executable="joystick_control",
+       
+        output="screen",
+    )
   
-    return LaunchDescription([model_arg, robot_state_publisher, gazebo_resource_path, gazebo, gz_spawn_entity, gz_ros_bridge, spawn_joint_state_broadcaster, spawn_velocity_controller])
+    return LaunchDescription([model_arg, robot_state_publisher, gazebo_resource_path, gazebo, gz_spawn_entity, gz_ros_bridge, spawn_joint_state_broadcaster,spawn_velocity_controller,joystick_node])

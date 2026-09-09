@@ -52,12 +52,34 @@
 
 
     <gazebo reference="base_link">
-        <sensor name="imu" type="imu">
+        <sensor name="imu_1" type="imu">
             <always_on>true</always_on>
             <update_rate>100</update_rate>
-            <topic>/imu</topic>
+            <topic>/imu_1</topic>
            
             <gz_frame_id>base_link</gz_frame_id> 
+            <imu>
+                <angular_velocity>
+                    <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
+                    <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></y>
+                    <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></z>
+                </angular_velocity>
+                <linear_acceleration>
+                    <x><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></x>
+                    <y><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></y>
+                    <z><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></z>
+                </linear_acceleration>
+            </imu>
+        </sensor>
+    </gazebo>
+
+    <gazebo reference="camera_link">
+        <sensor name="imu_2" type="imu">
+            <always_on>true</always_on>
+            <update_rate>100</update_rate>
+            <topic>/imu_2</topic>
+           
+            <gz_frame_id>camera_link</gz_frame_id> 
             <imu>
                 <angular_velocity>
                     <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
