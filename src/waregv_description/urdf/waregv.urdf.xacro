@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="waregv">
+
+    <xacro:arg name="is_ignition" default="true" />
+
+
+    <xacro:include filename="$(find waregv_description)/urdf/waregv_gazebo.xacro" />
+    <xacro:include filename="$(find waregv_description)/urdf/waregv_ros2_control.xacro" />
+
+    <link name="base_footprint" />
+    <link name="base_link">
+        <inertial>
+            <origin xyz="0 0 0.045" rpy="0 0 0" />
+            <mass value="3.0" />
+            <inertia ixx="0.05625" ixy="0.0" ixz="0.0" iyy="0.05625" iyz="0.0" izz="0.10125" />
+        </inertial>
+
+        <visual>
+            <origin rpy="1.57 0 1.57" xyz="0.2 0 0.045" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_chasis.obj"
+                    scale="0.01 0.01 0.01" />
+
+            </geometry>
+        </visual>
+
+        <collision>
+            <origin rpy="1.57 0 1.57" xyz="0.2 0 0.045" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_chasis.obj"
+                    scale="0.01 0.01 0.01" />
+
+            </geometry>
+        </collision>
+
+    </link>
+
+    <link name="wheel_front_left_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <mass value="0.25" />
+            <inertia ixx="0.000138" ixy="0.0" ixz="0.0" iyy="0.000138" iyz="0.0" izz="0.000226" />
+        </inertial>
+
+        <visual>
+            <origin rpy="0 0 -1.57" xyz="0 0.008 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_wheel.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <geometry>
+                <cylinder length="0.035" radius="0.0425" />
+            </geometry>
+
+        </collision>
+    </link>
+
+    <link name="wheel_rear_left_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <mass value="0.25" />
+            <inertia ixx="0.000138" ixy="0.0" ixz="0.0" iyy="0.000138" iyz="0.0" izz="0.000226" />
+        </inertial>
+
+        <visual>
+            <origin rpy="0 0 -1.57" xyz="0 0.008 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_wheel.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <geometry>
+                <cylinder length="0.035" radius="0.0425" />
+            </geometry>
+
+        </collision>
+    </link>
+
+    <link name="wheel_front_right_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <mass value="0.25" />
+            <inertia ixx="0.000138" ixy="0.0" ixz="0.0" iyy="0.000138" iyz="0.0" izz="0.000226" />
+        </inertial>
+
+        <visual>
+            <origin rpy="0 0 1.57" xyz="0 0.008 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_wheel.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <geometry>
+                <cylinder length="0.035" radius="0.0425" />
+            </geometry>
+
+        </collision>
+    </link>
+
+    <link name="wheel_rear_right_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <mass value="0.25" />
+            <inertia ixx="0.000138" ixy="0.0" ixz="0.0" iyy="0.000138" iyz="0.0" izz="0.000226" />
+        </inertial>
+
+        <visual>
+            <origin rpy="0 0 1.57" xyz="0 0.008 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_wheel.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 0" rpy="1.57 0 0" />
+            <geometry>
+                <cylinder length="0.035" radius="0.0425" />
+            </geometry>
+
+        </collision>
+    </link>
+
+
+    <link name="camera_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <mass value="0.5" />
+            <inertia ixx="0.001004" ixy="0.0" ixz="0.0" iyy="0.000133" iyz="0.0" izz="0.001004" />
+        </inertial>
+
+        <visual>
+            <origin rpy="1.57 0 1.57" xyz="0 0 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_depth_camera.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+    </link>
+    <link name="lidar_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <mass value="0.3" />
+            <inertia ixx="0.000185" ixy="0.0" ixz="0.0" iyy="0.000185" iyz="0.0" izz="0.000245" />
+        </inertial>
+
+        <visual>
+            <origin rpy="1.57 0 0" xyz="0 0 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_lidar.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+
+    </link>
+    <link name="sonar_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <mass value="0.05" />
+            <inertia ixx="0.000012" ixy="0.0" ixz="0.0" iyy="0.000003" iyz="0.0" izz="0.000012" />
+        </inertial>
+
+        <visual>
+            <origin rpy="1.57  0 1.57" xyz="0 0 0" />
+            <geometry>
+                <mesh filename="package://waregv_description/meshes/waregv_ultrasonic_sensor.obj"
+                    scale="0.01 0.01 0.01" />
+            </geometry>
+        </visual>
+
+
+    </link>
+
+
+    <joint name="base_joint" type="fixed">
+        <parent link="base_footprint" />
+        <child link="base_link" />
+        <origin rpy="0 0 0" xyz="0 0 0.033" />
+    </joint>
+
+    <joint name="wheel_front_left_joint" type="continuous">
+        <parent link="base_link" />
+        <child link="wheel_front_left_link" />
+        <origin rpy="0 0 0" xyz="0.14 0.205 0" />
+        <axis xyz="0 1 0" />
+    </joint>
+    <joint name="wheel_rear_left_joint" type="continuous">
+        <parent link="base_link" />
+        <child link="wheel_rear_left_link" />
+        <origin rpy="0 0 0" xyz="-0.14 0.205 0" />
+        <axis xyz="0 1 0" />
+    </joint>
+    <joint name="wheel_front_right_joint" type="continuous">
+        <parent link="base_link" />
+        <child link="wheel_front_right_link" />
+        <origin rpy="0 0 0" xyz="0.14 -0.22 0" />
+        <axis xyz="0 1 0" />
+    </joint>
+    <joint name="wheel_rear_right_joint" type="continuous">
+        <parent link="base_link" />
+        <child link="wheel_rear_right_link" />
+        <origin rpy="0 0 0" xyz="-0.14 -0.22 0" />
+        <axis xyz="0 1 0" />
+    </joint>
+
+    <joint name="camera_joint" type="fixed">
+        <parent link="base_link" />
+        <child link="camera_link" />
+        <origin rpy="0 0 0" xyz="0.242 0 0.265" />
+
+    </joint>
+
+    <joint name="lidar_joint" type="fixed">
+        <parent link="base_link" />
+        <child link="lidar_link" />
+        <origin rpy="0 0 0" xyz="0.2275 0 0.33" />
+
+    </joint>
+
+    <joint name="sonar_joint" type="fixed">
+        <parent link="base_link" />
+        <child link="sonar_link" />
+        <origin rpy="0 0 0" xyz="0.228 0 0.037" />
+
+    </joint>
+
+</robot>

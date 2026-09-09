@@ -1,0 +1,31 @@
+- ros_topic_name: "/imu"
+  gz_topic_name: "/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "ignition.msgs.IMU" 
+  direction: GZ_TO_ROS
+  lazy: true
+
+
+- ros_topic_name: "/scan"
+  gz_topic_name: "/scan"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "ignition.msgs.LaserScan"
+  direction: GZ_TO_ROS
+  lazy: true
+  ros_frame: "lidar_link"
+
+
+- ros_topic_name: "/sonar_scan"
+  gz_topic_name: "/sonar_scan"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "ignition.msgs.LaserScan"
+  direction: GZ_TO_ROS
+  lazy: true
+  ros_frame: "sonar_link"
+
+- ros_topic_name: "/camera/image_raw"
+  gz_topic_name: "/camera/image_raw"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "ignition.msgs.Image"
+  direction: GZ_TO_ROS
+  lazy: true
