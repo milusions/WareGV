@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "joystick_control=waregv_controller.joystick_controller:main"
+            "joystick_control=waregv_controller.joystick_controller:main",
+                        "inverse_kinematics=waregv_controller.inverse_kinematics:main"
         ],
     },
 )
