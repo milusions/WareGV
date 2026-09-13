@@ -26,7 +26,7 @@ class JoystickController(Node):
         )
 
         # Configurable velocity scaling factors
-        self.declare_parameter('max_linear_vel', 1.0)
+        self.declare_parameter('max_linear_vel', 0.5)
         self.declare_parameter('max_angular_vel', np.pi)
    
         self.send_stop = True

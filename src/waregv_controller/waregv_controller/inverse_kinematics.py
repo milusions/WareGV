@@ -22,8 +22,8 @@ class InverseKinematics(Node):
             '/velocity_controller/commands',
             10
         )
-        self.declare_parameter('wheel_radius', 0.425)
-        self.declare_parameter('wheel_base', 0.41)
+        self.declare_parameter('wheel_radius', 0.0325)
+        self.declare_parameter('wheel_base', 0.176)
         
         self.get_logger().info('CmdVel to Velocity Controller converter node started.')
 
@@ -43,7 +43,7 @@ class InverseKinematics(Node):
         
         transformation_matrix = np.array([[1/wheel_radius,wheel_base/(2*wheel_radius)],[1/wheel_radius, -wheel_base/(2*wheel_radius)]])
         
-        resultant_angular_velocities = (transformation_matrix @ np.array([[linear_cmd],[angular_cmd]]))* (60/(2*np.pi))
+        resultant_angular_velocities = (transformation_matrix @ np.array([[linear_cmd],[angular_cmd]]))
         
         return [resultant_angular_velocities[0][0],resultant_angular_velocities[1][0],resultant_angular_velocities[0][0],resultant_angular_velocities[1][0]]
     

@@ -29,8 +29,11 @@ def generate_launch_description():
         executable="robot_state_publisher",
         parameters=[{"robot_description":robot_description}]
     )
-    gazebo_resource_path = SetEnvironmentVariable(name="GZ_SIM_RESOURCE_PATH", value=[str(Path(waregv_description_dir).parent.resolve())])
     
+    models_path  = os.path.join(waregv_description_dir, "models")
+    gazebo_resource_path = SetEnvironmentVariable(name="GZ_SIM_RESOURCE_PATH", value=[str(Path(waregv_description_dir).parent.resolve()),":",models_path,":",waregv_description_dir])
+    
+    small_warehouse_world_path = os.path.join(waregv_description_dir, "worlds", "small_warehouse", "small_warehouse.world")
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             
@@ -40,14 +43,14 @@ def generate_launch_description():
             ), "/gz_sim.launch.py"
         ]),
         launch_arguments=[
-            ("gz_args", " -v 4 -r empty.sdf")
+            ("gz_args", f" -v 4 -r {small_warehouse_world_path}")
         ]
     )
     gz_spawn_entity = Node(
         package="ros_gz_sim",
         executable="create",
         output="screen",
-        arguments=["-world", "empty", "-topic", "robot_description", "-name", "waregv"]
+        arguments=["-world", "small_warehouse", "-topic", "robot_description", "-name", "waregv", "-z", "0.5"]
         
     )
     
@@ -127,24 +130,28 @@ def generate_launch_description():
         'slam_params_file',
         default=os.path.join(waregv_description_dir, 'config', 'slam_toolbox.yaml')
     )
+    map_file = os.path.join(waregv_description_dir, 'maps', 'small_warehouse','small_warehouse.yaml')
     slam_toolbox_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(slam_launch_path),
-    
-        launch_arguments={'use_sim_time': 'true', "slam_params_file":slam_params_file  }.items() 
+
+        launch_arguments={'use_sim_time': 'true','map_file_name':map_file, "slam_params_file":slam_params_file }.items() 
     )
     nav2_launch_path = os.path.join(
         get_package_share_directory('nav2_bringup'),
         'launch',
-        'navigation_launch.py'
+        'bringup_launch.py'
     )
     
     nav2_params_file = os.path.join(waregv_description_dir, 'config', 'nav2_params.yaml')
+  
     nav2_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(nav2_launch_path),
         launch_arguments={
             'use_sim_time': 'true',
             'params_file': nav2_params_file,
-            'autostart': 'true'
+        
+            'autostart': 'true',
+        
         }.items()
     )
     
@@ -172,7 +179,7 @@ def generate_launch_description():
                               gz_ros_bridge,
                               spawn_joint_state_broadcaster,
                               spawn_velocity_controller,
-                               odom_frame,
+                            #    odom_frame,
                               joystick_node,
                               waregv_controller,
                               waregv_odometry,
@@ -180,6 +187,6 @@ def generate_launch_description():
                               twist_mux_node,
                              
                               slam_toolbox_node,
-                              nav2_node,
+                            #   nav2_node,
                               rviz2,
                              ])
