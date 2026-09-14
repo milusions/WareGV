@@ -29,13 +29,6 @@
   ros_frame: "lidar_link"
 
 
-- ros_topic_name: "/sonar_scan"
-  gz_topic_name: "/sonar_scan"
-  ros_type_name: "sensor_msgs/msg/LaserScan"
-  gz_type_name: "gz.msgs.LaserScan"
-  direction: GZ_TO_ROS
-  lazy: true
-  ros_frame: "sonar_link"
 
 - ros_topic_name: "/camera/image_raw"
   gz_topic_name: "/camera/image_raw"

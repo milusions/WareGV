@@ -31,7 +31,7 @@ class FusedOdometryNode(Node):
         self.latest_imu_yaw_rate = 0.0
         
         # Parameters
-        self.declare_parameter('wheel_radius', 0.425)
+        self.declare_parameter('wheel_radius', 0.0325)
         # Gyro bias offset to fix the "slight deflection" over time
         self.declare_parameter('gyro_bias_z', 0.0) 
         
@@ -50,8 +50,8 @@ class FusedOdometryNode(Node):
         wheel_radius = self.get_parameter('wheel_radius').value
         
         # 1. Calculate linear velocity from wheels (keeping your RPM conversion)
-        wheel_angular_vel_right = msg.velocity[1] * ((2 * np.pi) / 60)
-        wheel_angular_vel_left = msg.velocity[0] * ((2 * np.pi) / 60)
+        wheel_angular_vel_right = msg.velocity[1] 
+        wheel_angular_vel_left = msg.velocity[0] 
         
         # Linear velocity v = r * (w_r + w_l) / 2
         linear_velocity = (wheel_radius / 2.0) * (wheel_angular_vel_right + wheel_angular_vel_left)

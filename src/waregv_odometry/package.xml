@@ -4,7 +4,7 @@
   <name>waregv_odometry</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="milonpauljs@gmail.com">milon</maintainer>
+  <maintainer email="random@gmail.com">random</maintainer>
   <license>TODO: License declaration</license>
 
   <test_depend>ament_copyright</test_depend>
