@@ -19,7 +19,7 @@ Built with **ROS 2 Jazzy**, **Gazebo Harmonic**, **SLAM**, and **Nav2**.
 
 **Autonomous navigation mode:**
 ```bash
-./start_sim.sh true <map_name>
+./start_sim.sh <mapping-enabled> <navigation-enabled> <map_name> <world_name>
 ```
 
 > Once RViz loads in navigation mode, manually set the initial pose to start the map topic stream.
