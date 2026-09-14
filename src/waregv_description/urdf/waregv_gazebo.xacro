@@ -2,8 +2,8 @@
 <robot xmlns:xacro="http://ros.org" name="waregv">
 
     <gazebo reference="wheel_front_left_link">
-        <mu1>1.5</mu1>
-        <mu2>1.5</mu2>
+        <mu1>2.5</mu1>
+        <mu2>2.5</mu2>
         <kp>1000000.0</kp> 
         <kd>10.0</kd>
         <minDepth>0.001</minDepth>
@@ -11,8 +11,8 @@
     </gazebo>
 
     <gazebo reference="wheel_rear_left_link">
-        <mu1>1.5</mu1>
-        <mu2>1.5</mu2>
+        <mu1>2.5</mu1>
+        <mu2>2.5</mu2>
         <kp>1000000.0</kp>
         <kd>10.0</kd>
         <minDepth>0.001</minDepth>
@@ -20,8 +20,8 @@
     </gazebo>
 
     <gazebo reference="wheel_front_right_link">
-        <mu1>1.5</mu1>
-        <mu2>1.5</mu2>
+        <mu1>2.5</mu1>
+        <mu2>2.5</mu2>
         <kp>1000000.0</kp>
         <kd>10.0</kd>
         <minDepth>0.001</minDepth>
@@ -29,8 +29,8 @@
     </gazebo>
 
     <gazebo reference="wheel_rear_right_link">
-        <mu1>1.5</mu1>
-        <mu2>1.5</mu2>
+        <mu1>2.5</mu1>
+        <mu2>2.5</mu2>
         <kp>1000000.0</kp>
         <kd>10.0</kd>
         <minDepth>0.001</minDepth>
@@ -137,7 +137,7 @@
             <update_rate>30</update_rate>
             <topic>/camera/image_raw</topic>
             <always_on>true</always_on>
-            <!-- Fixed for Gazebo Harmonic -->
+            <visualize>true</visualize>
             <gz_frame_id>camera_link</gz_frame_id> 
             <camera>
                 <!-- D435i RGB horizontal FOV is exactly 69.4 degrees -->
