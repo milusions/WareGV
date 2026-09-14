@@ -94,7 +94,8 @@ def generate_launch_description():
     waregv_controller = Node(
         package="waregv_controller",
         executable="joystick_control",
-        parameters=[{'use_sim_time': True}],
+   
+         parameters=[{'use_sim_time': True, "max_linear_vel":0.5, "max_angular_vel":3.14}],
         output="screen",
     )
     
