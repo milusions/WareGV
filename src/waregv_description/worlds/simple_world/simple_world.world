@@ -1,0 +1,190 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.6">
+    <world name="simple_world">
+
+        <gravity>0 0 -9.8</gravity>
+        <physics default="0" name="default_physics" type="ode">
+            <max_step_size>0.001</max_step_size>
+            <real_time_factor>1</real_time_factor>
+            <real_time_update_rate>1000</real_time_update_rate>
+        </physics>
+        
+        <gui fullscreen="0">
+            <plugin filename="MinimalScene" name="WareGV">
+                <gz-gui>
+                    <title>WareGv</title>
+                    <property type="bool" key="show_title_bar">false</property>
+                    <property type="string" key="state">docked</property>
+                </gz-gui>
+                <engine>ogre2</engine>
+                <scene>scene</scene>
+                <ambient_light>0.4 0.4 0.4</ambient_light>
+                <background_color>0.8 0.8 0.8</background_color>
+                <camera_pose>0.0 -8.0 10.0 0 0.9 1.57</camera_pose>
+            </plugin>
+            <plugin filename="GzSceneManager" name="Scene Manager">
+                <gz-gui>
+                    <property key="resizable" type="bool">false</property>
+                    <property key="width" type="double">0</property>
+                    <property key="height" type="double">0</property>
+                    <property key="x" type="double">-1000</property>
+                    <property key="y" type="double">-1000</property>
+                    <property key="state" type="string">floating</property>
+                    <property key="show_title_bar" type="bool">false</property>
+                    <property key="visible" type="bool">false</property>
+                </gz-gui>
+            </plugin>
+            <plugin filename="InteractiveViewControl" name="Interactive view control">
+                <gz-gui>
+                    <property key="resizable" type="bool">false</property>
+                    <property key="width" type="double">0</property>
+                    <property key="height" type="double">0</property>
+                    <property key="x" type="double">-1000</property>
+                    <property key="y" type="double">-1000</property>
+                    <property key="state" type="string">floating</property>
+                    <property key="show_title_bar" type="bool">false</property>
+                    <property key="visible" type="bool">false</property>
+                </gz-gui>
+            </plugin>
+        </gui>
+
+        <!-- Light Source -->
+        <light name="Light" type="point">
+            <pose frame="">0 0 12 0 0 0</pose>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+            <specular>0.2 0.2 0.2 1</specular>
+            <attenuation>
+                <range>100</range>
+                <constant>0.3</constant>
+                <linear>0.01</linear>
+                <quadratic>0.001</quadratic>
+            </attenuation>
+            <cast_shadows>1</cast_shadows>
+            <direction>0.1 0.1 -1</direction>
+        </light>
+
+        <!-- Ground Plane -->
+        <model name="ground_plane">
+            <static>true</static>
+            <link name="link">
+                <collision name="collision">
+                    <geometry>
+                        <plane>
+                            <normal>0 0 1</normal>
+                            <size>150 150</size>
+                        </plane>
+                    </geometry>
+                </collision>
+            </link>
+        </model>
+
+        <!-- ==================================================== -->
+        <!--     HIGH-ASYMMETRY 10m x 10m NAVIGATION ARENA        -->
+        <!-- ==================================================== -->
+
+        <!-- Enclosure Wall North -->
+        <model name="wall_north">
+            <static>true</static>
+            <pose>0 5.0 0.5 0 0 0</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Enclosure Wall South -->
+        <model name="wall_south">
+            <static>true</static>
+            <pose>0 -5.0 0.5 0 0 0</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Enclosure Wall East -->
+        <model name="wall_east">
+            <static>true</static>
+            <pose>5.0 0 0.5 0 0 1.5708</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Enclosure Wall West -->
+        <model name="wall_west">
+            <static>true</static>
+            <pose>-5.0 0 0.5 0 0 1.5708</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>10.0 0.2 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- ==================================================== -->
+        <!--           ASYMMETRIC INTERNAL STRUCTURES            -->
+        <!-- ==================================================== -->
+
+        <!-- Top Right: Large Massive Cylinder Anchor -->
+        <model name="anchor_large_cylinder">
+            <static>true</static>
+            <pose>2.5 3.0 0.5 0 0 0</pose>
+            <link name="link">
+                <collision name="collision"><geometry><cylinder><radius>0.7</radius><length>1.0</length></cylinder></geometry></collision>
+                <visual name="visual"><geometry><cylinder><radius>0.7</radius><length>1.0</length></cylinder></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Bottom Left: Tiny Cylindrical Post -->
+        <model name="anchor_small_cylinder">
+            <static>true</static>
+            <pose>-3.0 -2.5 0.5 0 0 0</pose>
+            <link name="link">
+                <collision name="collision"><geometry><cylinder><radius>0.2</radius><length>1.0</length></cylinder></geometry></collision>
+                <visual name="visual"><geometry><cylinder><radius>0.2</radius><length>1.0</length></cylinder></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Top Left: Rectangular Long Barrier -->
+        <model name="anchor_long_box">
+            <static>true</static>
+            <pose>-2.5 2.0 0.5 0 0 0.45</pose> <!-- Rotated at 0.45 rad to break orthogonal grid lines -->
+            <link name="link">
+                <collision name="collision"><geometry><box><size>1.6 0.5 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>1.6 0.5 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Bottom Right: Standard Heavy Block -->
+        <model name="anchor_square_box">
+            <static>true</static>
+            <pose>3.0 -2.0 0.5 0 0 0.1</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>0.9 0.9 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>0.9 0.9 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Off-Center Partition Spur Wall (Completely breaks left/right symmetry) -->
+        <model name="asymmetric_spur_wall">
+            <static>true</static>
+            <pose>-4.0 -0.5 0.5 0 0 0</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>2.0 0.2 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>2.0 0.2 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+        <!-- Isolated Small Column near Center Center-East -->
+        <model name="center_east_dot">
+            <static>true</static>
+            <pose>1.0 0.5 0.5 0 0 0</pose>
+            <link name="link">
+                <collision name="collision"><geometry><box><size>0.3 0.3 1.0</size></box></geometry></collision>
+                <visual name="visual"><geometry><box><size>0.3 0.3 1.0</size></box></geometry></visual>
+            </link>
+        </model>
+
+    </world>
+</sdf>

@@ -1,13 +1,12 @@
 from launch import LaunchDescription
 from pathlib import Path
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, IncludeLaunchDescription, TimerAction, GroupAction
 import os
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import Command, LaunchConfiguration, PythonExpression
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import UnlessCondition, IfCondition
 
 
@@ -21,6 +20,7 @@ def generate_launch_description():
     )
     
     mapping_check_arg = DeclareLaunchArgument(name="mapping", default_value='true')
+    nav2_check_arg = DeclareLaunchArgument(name="navigation", default_value='true')
     
     robot_description = ParameterValue(Command(["xacro ", LaunchConfiguration("model")]), value_type=str)
     
@@ -34,8 +34,10 @@ def generate_launch_description():
     
     gazebo_resource_path = SetEnvironmentVariable(name="GZ_SIM_RESOURCE_PATH", value=[str(Path(waregv_description_dir).parent.resolve()), ":", models_path, ":", waregv_description_dir])
     
-    small_warehouse_world_path = os.path.join(waregv_description_dir, "worlds", "small_warehouse", "small_warehouse.world")
+    world_name = os.environ.get('WORLD_NAME', 'small_warehouse')
     
+    world_path = os.path.join(waregv_description_dir, "worlds", world_name, f"{world_name}.world")
+   
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             
@@ -45,14 +47,14 @@ def generate_launch_description():
             ), "/gz_sim.launch.py"
         ]),
         launch_arguments=[
-            ("gz_args", f" -v 4 -r {small_warehouse_world_path}")
+            ("gz_args", f" -v 4 -r {world_path}")
         ]
     )
     gz_spawn_entity = Node(
         package="ros_gz_sim",
         executable="create",
         output="screen",
-        arguments=["-world", "small_warehouse", "-topic", "robot_description", "-name", "waregv", "-z", "0.5"]
+        arguments=["-world", f"{world_name}", "-topic", "robot_description", "-name", "waregv", "-z", "0.5"]
         
     )
     
@@ -134,8 +136,9 @@ def generate_launch_description():
         executable="rviz2",
         name="rviz2",
         output="screen",
-        condition=UnlessCondition(LaunchConfiguration("mapping")),
-        arguments=["-d", os.path.join(get_package_share_directory("waregv_description"), "rviz", "display.rviz")]
+          parameters=[{'use_sim_time': True}],
+        condition=UnlessCondition(LaunchConfiguration("navigation")),
+        arguments=["-d", os.path.join(get_package_share_directory("waregv_description"), "rviz", "mapping.rviz")]
        
        ),
              Node(
@@ -143,8 +146,9 @@ def generate_launch_description():
         executable="rviz2",
         name="rviz2",
         output="screen",
-        condition=IfCondition(LaunchConfiguration("mapping")),
-        arguments=["-d", os.path.join(get_package_share_directory("waregv_description"), "rviz", "mapping.rviz")]
+        parameters=[{'use_sim_time': True}],
+        condition=IfCondition(LaunchConfiguration("navigation")),
+        arguments=["-d", os.path.join(get_package_share_directory("waregv_description"), "rviz", "display.rviz")]
        
        )
         ])
@@ -178,17 +182,20 @@ def generate_launch_description():
     
     map_file = os.path.join(waregv_description_dir, "maps", map_name, f"{map_name}.yaml")
    
-    nav2_launch_path = os.path.join(
+    nav2_params_file = os.path.join(waregv_description_dir, 'config', 'nav2_params.yaml')
+    
+    nav_node = GroupAction(
+            actions=[
+                IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
         get_package_share_directory('nav2_bringup'),
         'launch',
         'bringup_launch.py'
-    )
-    
-    nav2_params_file = os.path.join(waregv_description_dir, 'config', 'nav2_params.yaml')
-  
-    nav2_node = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(nav2_launch_path),
-        condition=UnlessCondition(LaunchConfiguration("mapping")),
+    )),
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration("mapping"), "' == 'false' and '",
+            LaunchConfiguration("navigation"), "' == 'true'"
+        ])),
         launch_arguments={
             'use_sim_time': 'true',
             'params_file': nav2_params_file,
@@ -196,11 +203,32 @@ def generate_launch_description():
             'autostart': 'true',
         
         }.items()
+    ),
+                IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+        get_package_share_directory('nav2_bringup'),
+        'launch',
+        'navigation_launch.py'
+    )),
+             condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration("mapping"), "' == 'true' and '",
+            LaunchConfiguration("navigation"), "' == 'true'"
+        ])),
+        launch_arguments={
+            'use_sim_time': 'true',
+              'params_file': nav2_params_file,
+         
+            'autostart': 'true',
+        
+        }.items()
     )
-     
+            ]
+        )
+
     return LaunchDescription([
          model_arg,
                           mapping_check_arg,
+                          nav2_check_arg,
                               robot_state_publisher,
                               gazebo_resource_path,
                               gazebo,
@@ -216,6 +244,6 @@ def generate_launch_description():
                               twist_mux_node,
                               delayed_rviz,
                               slam_toolbox_node,
-                              nav2_node
+                              nav_node
                               
                              ])
