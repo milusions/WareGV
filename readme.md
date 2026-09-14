@@ -1,6 +1,5 @@
-# WareGV
+# WareGV: Warehouse Autonomous Ground Vehicle
 
-**Warehouse Autonomous Ground Vehicle**
 
 ![WareGV Thumbnail](assets/thumbnail.png)
 
@@ -14,7 +13,7 @@ Built with **ROS 2 Jazzy**, **Gazebo Harmonic**, **SLAM**, and **Nav2**.
 
 **Mapping mode:**
 ```bash
-./start_sim.sh false
+./start_sim.sh true false
 ```
 
 **Autonomous navigation mode:**
