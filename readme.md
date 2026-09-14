@@ -32,7 +32,7 @@ Save a map created during mapping:
 ./save_map.sh <map_name>
 ```
 
-The map is saved to `waregv_description/map`.
+The map is saved to `waregv_description/map`. 
 
 ---
 
