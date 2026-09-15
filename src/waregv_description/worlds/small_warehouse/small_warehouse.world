@@ -12,7 +12,7 @@
          
             <plugin filename="MinimalScene" name="WareGV">
                 <gz-gui>
-                    <title>WareGv</title>
+                    <title>WareGV</title>
                     <property type="bool" key="show_title_bar">false</property>
                     <property type="string" key="state">docked</property>
                 </gz-gui>
