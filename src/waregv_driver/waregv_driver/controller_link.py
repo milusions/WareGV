@@ -5,51 +5,9 @@ from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray, String
 from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy
 import serial
-import serial.tools.list_ports
 import threading
 import time
 import sys
-
-# --- USB identification ---
-# Genuine Arduino Uno (ATmega16u2 USB bridge) and common clones (CH340).
-ARDUINO_VID_PID = {
-    (0x2341, 0x0043),  # Arduino Uno (rev3)
-    (0x2341, 0x0001),  # Arduino Uno (older rev)
-    (0x2A03, 0x0043),  # Arduino.org branded Uno
-    (0x1A86, 0x7523),  # CH340-based clone (very common)
-}
-ARDUINO_VIDS_LOOSE = {0x2341, 0x2A03, 0x1A86}  # fallback if PID unknown/varies
-
-# YDLidar boards commonly use a Silicon Labs CP210x bridge — explicitly excluded.
-YDLIDAR_VIDS = {0x10C4}
-
-
-def find_arduino_port(preferred_port=None):
-    """
-    Return the serial port the Arduino Uno is connected to, ignoring
-    ports that look like a YDLidar (CP210x) device.
-    """
-    ports = list(serial.tools.list_ports.comports())
-
-    exact_matches = []
-    loose_matches = []
-
-    for p in ports:
-        vid, pid = p.vid, p.pid
-        if vid in YDLIDAR_VIDS:
-            continue  # skip lidar
-        if (vid, pid) in ARDUINO_VID_PID:
-            exact_matches.append(p.device)
-        elif vid in ARDUINO_VIDS_LOOSE:
-            loose_matches.append(p.device)
-
-    candidates = exact_matches + loose_matches
-
-    if preferred_port and preferred_port in candidates:
-        return preferred_port
-    if candidates:
-        return candidates[0]
-    return None
 
 
 class ControllerLink(Node):
@@ -57,11 +15,10 @@ class ControllerLink(Node):
         super().__init__('controller_link')
 
         # Parameters
-        # 'auto' triggers detection; or pass a list of specific ports to prefer/try.
-        self.declare_parameter('ports', ['auto'])
+        self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
 
-        self.ports_to_try = self.get_parameter('ports').value
+        self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
 
         # --- Rate Limiter Variables ---
@@ -88,42 +45,16 @@ class ControllerLink(Node):
         self.running = True
         self.ser = None
 
-        # --- Port Resolution ---
-        resolved_ports = []
-        if len(self.ports_to_try) == 1 and self.ports_to_try[0] == 'auto':
-            port = find_arduino_port()
-            if port:
-                resolved_ports = [port]
-        else:
-            # User gave explicit candidates; still verify against known Arduino IDs,
-            # but fall back to trying them as given if nothing matches.
-            for p in self.ports_to_try:
-                confirmed = find_arduino_port(preferred_port=p)
-                resolved_ports.append(confirmed if confirmed else p)
-
-        if not resolved_ports:
-            self.get_logger().error(
-                "Could not auto-detect an Arduino Uno on any USB port. "
-                "Check the connection or set the 'ports' parameter explicitly."
-            )
-            sys.exit(1)
-
         # --- Port Connection Logic ---
-        for port in resolved_ports:
-            self.get_logger().info(f"Attempting to connect to {port}...")
-            try:
-                self.ser = serial.Serial(port, self.baudrate, timeout=1)
-                time.sleep(2.0)  # Wait for Arduino bootloader
-                self.ser.reset_input_buffer()
-                self.ser.reset_output_buffer()
-                self.get_logger().info(f"SUCCESS: Connected to Arduino on {port}")
-                break
-            except serial.SerialException as e:
-                self.get_logger().warn(f"Failed to connect to {port}: {e}")
-                self.ser = None
-
-        if self.ser is None or not self.ser.is_open:
-            self.get_logger().error(f"FATAL: Could not connect to any resolved ports: {resolved_ports}")
+        self.get_logger().info(f"Attempting to connect directly to {self.port}...")
+        try:
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
+            time.sleep(2.0)  # Wait for Arduino bootloader
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            self.get_logger().info(f"SUCCESS: Connected to Arduino on {self.port}")
+        except serial.SerialException as e:
+            self.get_logger().error(f"FATAL: Failed to connect to {self.port}: {e}")
             sys.exit(1)
 
         # Background thread
