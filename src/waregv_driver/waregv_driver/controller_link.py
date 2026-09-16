@@ -88,7 +88,7 @@ class ControllerLink(Node):
                     if line.startswith('{') and line.endswith('}'):
                         msg = String()
                         msg.data = line
-                        print("Publishing line "+str(line))
+                     
                         self.telemetry_pub.publish(msg)
                 except UnicodeDecodeError:
                     pass
