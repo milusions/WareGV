@@ -2,7 +2,7 @@ import os
 from glob import glob
 from setuptools import find_packages, setup
 
-package_name = 'waregv_controller'
+package_name = 'waregv_mapping'
 
 
 def package_files(directory):
@@ -18,12 +18,11 @@ data_files = [
     ('share/' + package_name, ['package.xml']),
 ]
 
-for folder in ['launch']:
+for folder in ['maps', 'config','launch']:
     for file_path in package_files(folder):
         install_dir = os.path.join('share', package_name, os.path.dirname(file_path))
         data_files.append((install_dir, [file_path]))
-
-
+        
 setup(
     name=package_name,
     version='0.0.0',
@@ -31,7 +30,7 @@ setup(
     data_files=data_files,
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='milon paul jose',
+    maintainer='milon',
     maintainer_email='milonpauljs@gmail.com',
     description='TODO: Package description',
     license='TODO: License declaration',
@@ -42,8 +41,6 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "joystick_control=waregv_controller.joystick_controller:main",
-                        "inverse_kinematics=waregv_controller.inverse_kinematics:main"
         ],
     },
 )

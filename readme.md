@@ -8,20 +8,47 @@ An autonomous warehouse ground vehicle that uses SLAM and Nav2 to navigate a bui
 Built with **ROS 2 Jazzy**, **Gazebo Harmonic**, **SLAM**, and **Nav2**.
 
 ---
-
 ## Start Simulation
 
-**Mapping mode:**
 ```bash
-./start_sim.sh true false
+./bin/start_simulation.sh --world-name small_warehouse --max-linear-velocity 0.8 --mapping-enable false
 ```
 
-**Autonomous navigation mode:**
+### Flags
+
+| Flag Name | Expected Value Type | Default Value | Description |
+| :--- | :--- | :--- | :--- |
+| `--mapping-enable` | `true` / `false` | `true` | Activates SLAM mapping nodes. |
+| `--navigation-enable` | `true` / `false` | `true` | Activates Nav2 navigation stack stacks. |
+| `--world-name` | `string` | `small_warehouse` | Target Gazebo world file name. |
+| `--max-linear-velocity` | `float` | `0.5` | Maximum forward/backward speed limit (m/s). |
+| `--max-angular-velocity` | `float` | `3.14159265359` | Maximum rotation speed limit (π rad/s). |
+| `--wheel-radius` | `float` | `0.0325` | Radius of the robot differential wheels (meters). |
+| `--wheel-base` | `float` | `0.176` | Distance between left and right wheels (meters). |
+| `--model` | `string` | `waregv.urdf.xacro` | Target robot URDF description filename. |
+| `--spawn-z` | `float` | `0.5` | Drop height position configuration for Gazebo sim. |
+| `--map-name` | `string` | `small_warehouse` | Name of the pre-saved map to be loaded. |
+
+> If navigation without mapping chosen, you must manually set the initial pose to start the map topic stream through Rviz.
+
+---
+
+## Start Hardware
 ```bash
-./start_sim.sh <mapping-enabled> <navigation-enabled> <map_name> <world_name>
+./bin/start_hardware.sh --max-linear-velocity 0.8 --mapping-enable false
 ```
 
-> Once RViz loads in navigation mode, manually set the initial pose to start the map topic stream.
+### Flags
+
+| Flag Name | Expected Value Type | Default Value | Description |
+| :--- | :--- | :--- | :--- |
+| `--mapping-enable` | `true` / `false` | `true` | Activates SLAM mapping nodes. |
+| `--navigation-enable` | `true` / `false` | `true` | Activates Nav2 navigation stack stacks. |
+| `--max-linear-velocity` | `float` | `0.5` | Maximum forward/backward speed limit (m/s). |
+| `--max-angular-velocity` | `float` | `3.14159265359` | Maximum rotation speed limit (π rad/s). |
+| `--wheel-radius` | `float` | `0.0325` | Radius of the robot differential wheels (meters). |
+| `--wheel-base` | `float` | `0.176` | Distance between left and right wheels (meters). |
+| `--map-name` | `string` | `small_warehouse` | Name of the pre-saved map to be loaded. |
 
 ---
 
@@ -29,7 +56,7 @@ Built with **ROS 2 Jazzy**, **Gazebo Harmonic**, **SLAM**, and **Nav2**.
 
 Save a map created during mapping:
 ```bash
-./save_map.sh <map_name>
+./bin/save_map.sh <map_name>
 ```
 
 The map is saved to `waregv_description/map`. 
@@ -39,5 +66,5 @@ The map is saved to `waregv_description/map`.
 ## View URDF
 
 ```bash
-./view_urdf.sh
+./bin/view_urdf.sh
 ```
