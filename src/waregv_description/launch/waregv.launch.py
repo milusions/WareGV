@@ -213,7 +213,7 @@ def generate_launch_description():
                               robot_state_publisher,
                               ydlidar_node,
                               controller_link,
-                            #   motor_encoder,
+                              motor_encoder,
                               imu,
                               odom_frame,
                               joystick_node,
@@ -221,7 +221,7 @@ def generate_launch_description():
                               waregv_odometry,
                               waregv_inverse_kinematics,
                               twist_mux_node,
-                              delayed_rviz,
+                            #   delayed_rviz,
                               slam_toolbox_node,
                               nav_node
                               
