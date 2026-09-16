@@ -41,7 +41,31 @@ def generate_launch_description():
     
     ydlidar_node = Node(
         package="waregv_driver",
-        executable="rpilidar",
+        executable="ydlidar",
+   
+         parameters=[{'use_sim_time': use_sim_time}],
+        output="screen",
+    )
+    
+    controller_link = Node(
+        package="waregv_driver",
+        executable="controller_link",
+   
+         parameters=[{'use_sim_time': use_sim_time}],
+        output="screen",
+    )
+    
+    motor_encoder = Node(
+        package="waregv_driver",
+        executable="motor_encoder",
+   
+         parameters=[{'use_sim_time': use_sim_time}],
+        output="screen",
+    )
+    
+    imu = Node(
+        package="waregv_driver",
+        executable="imu",
    
          parameters=[{'use_sim_time': use_sim_time}],
         output="screen",
@@ -188,6 +212,9 @@ def generate_launch_description():
                               nav2_check_arg,
                               robot_state_publisher,
                               ydlidar_node,
+                              controller_link,
+                            #   motor_encoder,
+                              imu,
                               odom_frame,
                               joystick_node,
                               waregv_controller,

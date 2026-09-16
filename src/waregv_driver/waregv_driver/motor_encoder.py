@@ -24,9 +24,10 @@ class JointStateNode(Node):
         self.get_logger().info("Joint State Node initialized, waiting for telemetry...")
 
     def telemetry_callback(self, msg):
+        
         try:
             data = json.loads(msg.data)
-            
+         
             required_keys = ('rfp', 'rrp', 'lfp', 'lrp', 'rfv', 'rrv', 'lfv', 'lrv')
             if all(k in data for k in required_keys):
                 now = self.get_clock().now().to_msg()
@@ -58,7 +59,7 @@ class JointStateNode(Node):
                 ]
                 
                 self.joint_pub.publish(js_msg)
-                
+          
         except json.JSONDecodeError:
             self.get_logger().warn("Malformed JSON received")
 

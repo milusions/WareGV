@@ -1,3 +1,4 @@
+export ROS_DOMAIN_ID=0
 colcon build
 source install/setup.sh
 export MAP_NAME=${3:-"small_warehouse"}
