@@ -8,6 +8,7 @@ import serial
 import threading
 import time
 import sys
+import math
 
 
 class ControllerLink(Node):
@@ -17,9 +18,16 @@ class ControllerLink(Node):
         # Parameters
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
+        self.declare_parameter('max_rpm', 550.0)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
+        max_rpm = self.get_parameter('max_rpm').value
+
+        # Calculate max rad/sec limit based on max RPM
+        # RPM to Rad/Sec formula: RPM * (2 * PI / 60)
+        self.max_rad_sec = max_rpm * (2.0 * math.pi / 60.0)
+        self.get_logger().info(f"Max RPM set to {max_rpm}, equivalent to {self.max_rad_sec:.2f} rad/sec")
 
         # --- Rate Limiter Variables ---
         self.last_cmd_time = 0.0
@@ -62,7 +70,7 @@ class ControllerLink(Node):
         self.read_thread.start()
 
     def cmd_callback(self, msg):
-        """Receives array of 4 floats: [right_front, right_rear, left_front, left_rear]"""
+        """Receives array of 4 floats: [right_front, right_rear, left_front, left_rear] in rad/s"""
         if not (self.ser and self.ser.is_open):
             return
 
@@ -72,7 +80,20 @@ class ControllerLink(Node):
         self.last_cmd_time = current_time
 
         if len(msg.data) >= 4:
-            json_str = f'{{"rf":{msg.data[0]:.3f},"rr":{msg.data[1]:.3f},"lf":{msg.data[2]:.3f},"lr":{msg.data[3]:.3f}}}\n'
+            # Helper function to convert rad/sec into a -1.0 to 1.0 range
+            def normalize_velocity(rad_sec_val):
+                # Scale the velocity relative to the max_rad_sec
+                normalized = rad_sec_val / self.max_rad_sec
+                # Clamp the output between -1.0 (full reverse) and 1.0 (full forward)
+                return max(-1.0, min(1.0, normalized))
+
+            rf = normalize_velocity(msg.data[0])
+            rr = normalize_velocity(msg.data[1])
+            lf = normalize_velocity(msg.data[2])
+            lr = normalize_velocity(msg.data[3])
+
+            json_str = f'{{"rf":{rf:.3f},"rr":{rr:.3f},"lf":{lf:.3f},"lr":{lr:.3f}}}\n'
+            
             try:
                 with self.write_lock:
                     self.ser.write(json_str.encode('utf-8'))
