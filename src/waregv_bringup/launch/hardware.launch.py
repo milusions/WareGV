@@ -8,6 +8,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.substitutions import PathJoinSubstitution
 import numpy as np
 from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
+from launch_ros.substitutions.find_package import FindPackageShare
 
 
 def generate_launch_description(): 
@@ -44,6 +45,22 @@ def generate_launch_description():
             'ssl': 'false'
         }.items()
     )
+    
+    foxglove_bridge = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([
+                FindPackageShare('foxglove_bridge'),
+                'launch',
+                'foxglove_bridge_launch.xml'
+            ])
+        ),
+        # Optional: Override default arguments like port (defaults to 8765)
+        launch_arguments={
+            'port': '8765',
+            'send_buffer_limit': '10000000' 
+        }.items()
+    )
+    
     
     twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, 'config', 'twist_mux.yaml')
 
@@ -121,12 +138,13 @@ def generate_launch_description():
         wheel_radius_arg,
         wheel_base_arg,
         # heartbeat_light,
+        foxglove_bridge,
         rosbridge_node,
         waregv_driver,
         twist_mux_node,
         waregv_odometry,
         waregv_controller,
-        # waregv_mapping,
+        waregv_mapping,
         waregv_navigation
     ])
 
