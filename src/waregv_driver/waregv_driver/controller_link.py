@@ -5,6 +5,8 @@ import serial
 import sys
 import threading
 import time
+import os
+from datetime import datetime
 
 import rclpy
 from rclpy.node import Node
@@ -16,30 +18,27 @@ class ControllerLink(Node):
     def __init__(self):
         super().__init__('controller_link')
 
+        # --- Configure Local File Logger ---
+        self.log_file = os.path.expanduser('~/waregv_ws/arduino_link.log')
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
+        self.log_msg("INFO", "=== Arduino Controller Link Started ===")
+
         # Parameters
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
-        
-        # Explicit max velocity configuration (14.0 rad/s -> 1.0)
-        self.declare_parameter('max_rad_sec', 14.0)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
-        self.max_rad_sec = float(self.get_parameter('max_rad_sec').value)
 
-        if self.max_rad_sec <= 0:
-            self.max_rad_sec = 14.0  # Safe fallback
-
-        self.get_logger().info(f"[INIT] Max Rad/Sec set to {self.max_rad_sec:.2f} (Maps {self.max_rad_sec:.1f} rad/s -> 1.0)")
-
-        # --- Rate Limiter Variables ---
+        # Rate Limiter Variables
         self.last_cmd_time = 0.0
         self.min_cmd_interval = 1.0 / 30.0  # Cap output at 30Hz
 
         # Publishers
         self.telemetry_pub = self.create_publisher(String, '/controller/telemetry', 10)
 
-        # Matched RELIABLE QoS Profile to avoid message drop during sharp turns
+        # Matched RELIABLE QoS Profile
         qos_profile = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
@@ -58,28 +57,48 @@ class ControllerLink(Node):
         self.ser = None
 
         # --- Port Connection Logic ---
-        self.get_logger().info(f"[SERIAL] Connecting to {self.port} at {self.baudrate} baud...")
+        self.log_msg("INFO", f"Connecting to {self.port} at {self.baudrate} baud...")
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
             time.sleep(2.0)  # Wait for Arduino bootloader reset
             self.ser.reset_input_buffer()
             self.ser.reset_output_buffer()
-            self.get_logger().info(f"[SERIAL] SUCCESS: Connected on {self.port}")
+            self.log_msg("INFO", f"SUCCESS: Connected on {self.port}")
         except serial.SerialException as e:
-            self.get_logger().error(f"[SERIAL] FATAL: Failed to connect to {self.port}: {e}")
+            self.log_msg("ERROR", f"FATAL: Failed to connect to {self.port}: {e}")
             sys.exit(1)
 
         # Background thread for incoming telemetry
         self.read_thread = threading.Thread(target=self.serial_read_loop, daemon=True)
         self.read_thread.start()
 
+    def log_msg(self, level, msg):
+        """Helper function to log simultaneously to ROS and a local text file."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_line = f"{timestamp} [{level}] {msg}\n"
+        
+        # Write to file
+        try:
+            with open(self.log_file, 'a') as f:
+                f.write(log_line)
+        except IOError:
+            pass
+            
+        # Write to ROS logger
+        if level == "INFO":
+            self.get_logger().info(msg)
+        elif level == "WARN":
+            self.get_logger().warn(msg)
+        elif level == "ERROR":
+            self.get_logger().error(msg)
+
     def cmd_callback(self, msg):
         """
-        Receives array of 4 floats from ROS controller:
-        Typical ROS 2 Skid-Steer order: [left_front, right_front, left_rear, right_rear]
+        Receives array of commands, extracts raw left/right, applies custom turn logic, 
+        and sends directly to Arduino.
         """
         if not (self.ser and self.ser.is_open):
-            self.get_logger().warn("[CMD DROP] Serial port is not open.")
+            self.log_msg("WARN", "Serial port is not open. Dropping command.")
             return
 
         current_time = time.time()
@@ -88,33 +107,35 @@ class ControllerLink(Node):
         self.last_cmd_time = current_time
 
         raw_vals = msg.data
-        self.get_logger().info(f"[RAW CMD] Data rad/s: {[round(v, 2) for v in raw_vals]}")
-
-        if len(raw_vals) < 4:
-            self.get_logger().error(f"[CMD ERROR] Expected >= 4 commands, received {len(raw_vals)}.")
+        if len(raw_vals) < 2:
+            self.log_msg("ERROR", f"Expected >= 2 commands, received {len(raw_vals)}.")
             return
 
-        # Maps input rad/sec to [-1.0, 1.0] range based on max 14.0 rad/s limit
-        def normalize_and_clamp_inverted(rad_sec_val):
-            normalized = -1.0 * (rad_sec_val / self.max_rad_sec)
-            return max(-1.0, min(1.0, float(normalized)))
+        # Take raw values exactly as they are without scaling
+        # Assuming index 0 is left and index 1 is right (standard array ordering)
+        lw = float(raw_vals[0])
+        rw = float(raw_vals[1])
 
-        # Standard ROS 2 Skid-Steer mapping with inverted direction logic
-        lf = normalize_and_clamp_inverted(raw_vals[0])
-        rf = normalize_and_clamp_inverted(raw_vals[1])
-        lr = normalize_and_clamp_inverted(raw_vals[2])
-        rr = normalize_and_clamp_inverted(raw_vals[3])
+        # --- Custom Single-Wheel Turning Logic ---
+        # If the intended turn is left, rw > lw. If intended turn is right, lw > rw.
+        if (rw - lw) > 0.01:
+            # Turning Left: Turn left motor fully off
+            lw = 0.0
+        elif (lw - rw) > 0.01:
+            # Turning Right: Turn right motor fully off
+            rw = 0.0
 
-        json_str = f'{{"rf":{rf:.3f},"rr":{rr:.3f},"lf":{lf:.3f},"lr":{lr:.3f}}}\n'
+        # Build clean JSON packet
+        json_str = f'{{"rw":{rw:.3f},"lw":{lw:.3f}}}\n'
         
-        self.get_logger().info(f"[TX ARDUINO] Scaled [-1, 1]: [LF: {lf:.3f}, RF: {rf:.3f}, LR: {lr:.3f}, RR: {rr:.3f}]")
+        self.log_msg("INFO", f"Sending to Arduino: {json_str.strip()}")
 
         try:
             with self.write_lock:
                 self.ser.write(json_str.encode('utf-8'))
                 self.ser.flush()
         except Exception as e:
-            self.get_logger().error(f"[TX ERROR] Failed writing to serial: {e}")
+            self.log_msg("ERROR", f"Failed writing to serial: {e}")
 
     def serial_read_loop(self):
         while self.running and rclpy.ok():
@@ -122,22 +143,24 @@ class ControllerLink(Node):
                 try:
                     line = self.ser.readline().decode('utf-8').strip()
                     if line.startswith('{') and line.endswith('}'):
-                        msg = String()
-                        msg.data = line
-                        self.telemetry_pub.publish(msg)
+                        str_msg = String()
+                        str_msg.data = line
+                        self.telemetry_pub.publish(str_msg)
                 except UnicodeDecodeError:
                     pass
                 except Exception as e:
-                    self.get_logger().error(f"[RX ERROR] Serial read failed: {e}")
+                    self.log_msg("ERROR", f"Serial read failed: {e}")
 
     def destroy_node(self):
         self.running = False
         if hasattr(self, 'ser') and self.ser and self.ser.is_open:
             with self.write_lock:
                 try:
-                    stop_cmd = '{"rf":0.0,"rr":0.0,"lf":0.0,"lr":0.0}\n'
+                    # Halt command upon exit
+                    stop_cmd = '{"rw":0.0,"lw":0.0}\n'
                     self.ser.write(stop_cmd.encode('utf-8'))
                     self.ser.flush()
+                    self.log_msg("INFO", "Sent stop command on shutdown.")
                 except Exception:
                     pass
             self.ser.close()
