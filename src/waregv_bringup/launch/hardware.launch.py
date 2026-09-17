@@ -9,6 +9,7 @@ from launch.substitutions import PathJoinSubstitution
 import numpy as np
 from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
 from launch_ros.substitutions.find_package import FindPackageShare
+from launch_xml.launch_description_sources.xml_launch_description_source import XMLLaunchDescriptionSource
 
 
 def generate_launch_description(): 
@@ -47,20 +48,18 @@ def generate_launch_description():
     )
     
     foxglove_bridge = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
+        # USE XMLLaunchDescriptionSource HERE:
+        XMLLaunchDescriptionSource(
             PathJoinSubstitution([
                 FindPackageShare('foxglove_bridge'),
                 'launch',
                 'foxglove_bridge_launch.xml'
             ])
         ),
-        # Optional: Override default arguments like port (defaults to 8765)
         launch_arguments={
-            'port': '8765',
-            'send_buffer_limit': '10000000' 
+            'port': '8765'
         }.items()
     )
-    
     
     twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, 'config', 'twist_mux.yaml')
 
