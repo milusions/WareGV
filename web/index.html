@@ -515,6 +515,86 @@
             color: var(--text-main);
         }
 
+        /* ----- Wheel Velocity Control ----- */
+        .wheel-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.6rem;
+            margin-top: 0.5rem;
+        }
+        .wheel-slider-card {
+            background: var(--card-bg-2);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 0.6rem 0.7rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+        .wheel-slider-card label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: baseline;
+            gap: 0.35rem;
+        }
+        .wheel-tag {
+            font-size: 0.62rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .wheel-slider-card input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 5px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, var(--danger) 0%, var(--border-color) 50%, var(--primary) 100%);
+            outline: none;
+            margin: 0.15rem 0;
+        }
+        .wheel-slider-card input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 2px solid var(--primary);
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        .wheel-slider-card input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 2px solid var(--primary);
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        .wheel-val {
+            align-self: flex-end;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .wheel-hint {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            line-height: 1.4;
+        }
+        .wheel-hint code {
+            background: var(--card-bg-2);
+            border: 1px solid var(--border-color);
+            padding: 0.05rem 0.3rem;
+            border-radius: 4px;
+            color: var(--text-main);
+        }
+
         .input-group {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -993,6 +1073,7 @@
             .input-group { grid-template-columns: 1fr 1fr; row-gap: 0.5rem; }
             .btn-row { flex-wrap: wrap; }
             .btn-row button { min-width: 45%; }
+            .wheel-grid { grid-template-columns: 1fr 1fr; }
 
             .helio-fab { top: auto; bottom: 1rem; height: 46px; padding: 0 1rem; }
             .helio-fab span { font-size: 0.85rem; }
@@ -1260,6 +1341,41 @@
                     <button class="btn-success" onclick="sendWaypoints()">Follow Waypoints</button>
                 </div>
 
+                <hr class="divider">
+
+                <div>
+                    <div class="panel-section-title">Wheel Velocity Control</div>
+                    <div class="wheel-grid">
+                        <div class="wheel-slider-card">
+                            <label for="wheel-fl">FL <span class="wheel-tag">Front-Left</span></label>
+                            <input type="range" id="wheel-fl" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('fl')">
+                            <span class="wheel-val" id="wheel-fl-val">0.00</span>
+                        </div>
+                        <div class="wheel-slider-card">
+                            <label for="wheel-fr">FR <span class="wheel-tag">Front-Right</span></label>
+                            <input type="range" id="wheel-fr" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('fr')">
+                            <span class="wheel-val" id="wheel-fr-val">0.00</span>
+                        </div>
+                        <div class="wheel-slider-card">
+                            <label for="wheel-bl">BL <span class="wheel-tag">Back-Left</span></label>
+                            <input type="range" id="wheel-bl" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('bl')">
+                            <span class="wheel-val" id="wheel-bl-val">0.00</span>
+                        </div>
+                        <div class="wheel-slider-card">
+                            <label for="wheel-br">BR <span class="wheel-tag">Back-Right</span></label>
+                            <input type="range" id="wheel-br" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('br')">
+                            <span class="wheel-val" id="wheel-br-val">0.00</span>
+                        </div>
+                    </div>
+                    <div class="btn-row" style="margin-top: 0.6rem;">
+                        <button class="btn-secondary" onclick="nudgeAllWheels(0.5)">All Fwd 0.5</button>
+                        <button class="btn-danger" onclick="stopAllWheels()">Stop All</button>
+                    </div>
+                    <div class="wheel-hint">Publishes <code>[fr, br, fl, bl]</code> to <code>/velocity_commands/commands</code> as a Float32MultiArray, live as you drag.</div>
+                </div>
+
+                <hr class="divider">
+
                 <div class="btn-row">
                     <button class="btn-secondary" onclick="clearMarkers()">Clear Canvas</button>
                     <button class="btn-danger" onclick="sendAbort()">ABORT MISSION</button>
@@ -1315,6 +1431,52 @@
             const nodeEl = document.getElementById('stat-node');
             if (nodeEl) nodeEl.textContent = 'Standby';
         });
+
+        // ---- Wheel Velocity Control (/velocity_commands/commands) ----
+        // Publishes a Float32MultiArray: [fr, br, fl, bl]
+        const velocityTopic = new ROSLIB.Topic({
+            ros: ros,
+            name: '/velocity_commands/commands',
+            messageType: 'std_msgs/Float32MultiArray'
+        });
+
+        const wheelIds = ['fr', 'br', 'fl', 'bl'];
+        let velocityPublishTimer = null;
+
+        function getWheelValues() {
+            return wheelIds.map(id => parseFloat(document.getElementById('wheel-' + id).value) || 0);
+        }
+
+        function publishWheelVelocities() {
+            const values = getWheelValues();
+            try {
+                velocityTopic.publish(new ROSLIB.Message({ data: values }));
+            } catch (e) {
+                showToast(CONNECTION_ERROR_MSG);
+            }
+        }
+
+        function onWheelSliderInput(id) {
+            const val = parseFloat(document.getElementById('wheel-' + id).value);
+            document.getElementById('wheel-' + id + '-val').textContent = val.toFixed(2);
+            publishWheelVelocities();
+        }
+
+        function stopAllWheels() {
+            wheelIds.forEach(id => {
+                document.getElementById('wheel-' + id).value = 0;
+                document.getElementById('wheel-' + id + '-val').textContent = '0.00';
+            });
+            publishWheelVelocities();
+        }
+
+        function nudgeAllWheels(value) {
+            wheelIds.forEach(id => {
+                document.getElementById('wheel-' + id).value = value;
+                document.getElementById('wheel-' + id + '-val').textContent = value.toFixed(2);
+            });
+            publishWheelVelocities();
+        }
 
         let viewer, gridClient;
         const ROTATE_CLOCKWISE = false;
@@ -1889,9 +2051,9 @@
             
             setRobotMood('thinking', 'Processing', text);
             playProcessingSound();
-  
+
             try {
-                const response = await fetch('http://'+window.location.hostname+':8001/agentic/waregv', {
+                const response = await fetch('http://localhost:8001/agentic/waregv', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: text, call_id: currentCallId })
@@ -1952,7 +2114,7 @@
                 window.currentUtterance = utterance;
                 window.speechSynthesis.speak(utterance);
             } else {
-                setTimeout(closeVoiceModal, 4000);
+                setTimeout(closeVoiceModal, 4000); 
             }
         }
     </script>
