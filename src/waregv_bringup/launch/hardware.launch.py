@@ -126,7 +126,7 @@ def generate_launch_description():
         twist_mux_node,
         waregv_odometry,
         waregv_controller,
-        waregv_mapping,
+        # waregv_mapping,
         waregv_navigation
     ])
 
