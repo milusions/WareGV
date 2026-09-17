@@ -59,6 +59,7 @@ def generate_launch_description():
         package='waregv_heartbeat',
         executable='heartbeat_light',
         name='heartbeat_light',
+            parameters=[{'use_sim_time': use_sim_time}],
        
     )
     
