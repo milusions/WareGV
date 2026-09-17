@@ -26,6 +26,7 @@ def generate_launch_description():
     
     robot_description = ParameterValue(Command(["xacro ", urdf_file_path]), value_type=str)
     
+    
     is_visualize_active = IfCondition(
         PythonExpression(["'", LaunchConfiguration("visualize"), "' == 'true'"])
     )

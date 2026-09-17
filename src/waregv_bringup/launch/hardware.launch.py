@@ -7,6 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.substitutions import PathJoinSubstitution
 import numpy as np
+from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
 
 
 def generate_launch_description():
@@ -31,7 +32,19 @@ def generate_launch_description():
 
     use_sim_time = 'false' 
     
+    rosbridge_dir = get_package_share_directory('rosbridge_server')
+    
+    rosbridge_node = IncludeLaunchDescription(
+        FrontendLaunchDescriptionSource(
+            os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
+        ),
 
+        launch_arguments={
+            'port': '9090',
+            'ssl': 'false'
+        }.items()
+    )
+    
     twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, 'config', 'twist_mux.yaml')
 
     twist_mux_node = Node(
@@ -40,6 +53,13 @@ def generate_launch_description():
         name='twist_mux',
         parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
         remappings=[('/cmd_vel_out', '/cmd_vel_unstamped')]
+    )
+    
+    heartbeat_light = Node(
+        package='waregv_heartbeat',
+        executable='heartbeat_light',
+        name='heartbeat_light',
+       
     )
     
 
@@ -99,6 +119,8 @@ def generate_launch_description():
         max_angular_velocity_arg,
         wheel_radius_arg,
         wheel_base_arg,
+        heartbeat_light,
+        rosbridge_node,
         waregv_driver,
         twist_mux_node,
         waregv_odometry,

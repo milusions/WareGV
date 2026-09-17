@@ -6,6 +6,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch.substitutions import  LaunchConfiguration, PythonExpression
 from launch.conditions import  IfCondition
 from launch.substitutions.path_join_substitution import PathJoinSubstitution
+from launch_ros.actions.node import Node
 
 
 def generate_launch_description():
@@ -65,12 +66,29 @@ def generate_launch_description():
     )
             ]
         )
+    
+    commander_node = Node(
+        package="waregv_navigation",
+        executable="commander",
+   
+         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
+        output="screen",
+    )
+    
+    commander_rest_server_node = Node(
+        package="waregv_navigation",
+        executable="commander_rest_server",
+         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
+        output="screen",
+    )
 
     return LaunchDescription([
         use_sim_time_arg,
         map_name_arg,
                           mapping_check_arg,
                           navigation_check_arg,
-                              nav_node
+                              nav_node,
+                              commander_node,
+                              commander_rest_server_node
                               
                              ])

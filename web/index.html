@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milusions WareGV — Autonomous Navigation Dashboard</title>
+    <!-- ROS Web Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/easeljs@1.0.2/lib/easeljs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/eventemitter2@6.4.9/lib/eventemitter2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1.3.0/build/roslib.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ros2d@0.9.0/build/ros2d.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #0077ff;
+            --danger: #E30035;
+            --success: #009D5B;
+            --slate: #393E46;
+            --bg-canvas: #f4f7fc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --sidebar-bg: #ffffff;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-canvas);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ----- Side Navigation (Sidebar) ----- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1.5rem 1rem;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .sidebar-top {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding-left: 0.5rem;
+        }
+
+        .brand-logo {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, var(--primary), #0056cc);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 119, 255, 0.25);
+        }
+
+        .brand-logo svg {
+            width: 22px;
+            height: 22px;
+            fill: #ffffff;
+        }
+
+        .brand-title h1 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 0;
+            color: var(--slate);
+            letter-spacing: -0.02em;
+        }
+
+        .brand-title p {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin: 0;
+            font-weight: 500;
+        }
+
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background-color: rgba(0, 119, 255, 0.08);
+            color: var(--primary);
+        }
+
+        .sidebar-footer {
+            padding: 0.75rem;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .operator-info h4 {
+            font-size: 0.8rem;
+            margin: 0;
+            color: var(--slate);
+        }
+
+        .operator-info p {
+            font-size: 0.7rem;
+            margin: 0;
+            color: var(--text-muted);
+        }
+
+        /* ----- Main Layout Wrapper ----- */
+        .main-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ----- Top Header Bar ----- */
+        .header-bar {
+            height: 70px;
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            box-sizing: border-box;
+            z-index: 5;
+        }
+
+        .header-title h2 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin: 0;
+            color: var(--slate);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background-color: #f1f5f9;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+        }
+        .status-badge.connected {
+            background-color: rgba(0, 157, 91, 0.1);
+            color: var(--success);
+            border-color: rgba(0, 157, 91, 0.2);
+        }
+
+        .header-audio-btn {
+            background-color: var(--primary);
+            color: #ffffff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            box-shadow: 0 2px 8px rgba(0, 119, 255, 0.3);
+            transition: opacity 0.2s;
+        }
+        .header-audio-btn:hover { opacity: 0.9; }
+
+        /* ----- Dashboard Content Workspace ----- */
+        .dashboard-content {
+            flex: 1;
+            padding: 1.5rem;
+            display: flex;
+            gap: 1.5rem;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        /* Map Workspace Card */
+        .map-workspace {
+            flex: 1;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 20px rgba(57, 62, 70, 0.04);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .map-container {
+            background-color: #0b0f19;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            flex: 1;
+            width: 100%;
+            touch-action: none;
+        }
+
+        #map {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-90deg);
+            transform-origin: center center;
+            cursor: crosshair;
+        }
+
+        /* Control Panel Workspace Card */
+        .control-panel {
+            width: 360px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            box-shadow: 0 4px 20px rgba(57, 62, 70, 0.04);
+            overflow-y: auto;
+        }
+
+        .panel-section-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--slate);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .coords-box {
+            background: #f8fafc;
+            border: 1px solid var(--border-color);
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.8rem;
+            color: var(--slate);
+        }
+
+        .input-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0.5rem;
+        }
+        
+        label { 
+            font-size: 0.75rem; 
+            font-weight: 600; 
+            color: var(--text-muted); 
+            display: block; 
+            margin-bottom: 0.25rem;
+        }
+        
+        input[type="number"] {
+            background-color: #f8fafc;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 0.5rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            width: 100%;
+            box-sizing: border-box;
+            outline: none;
+        }
+        input[type="number"]:focus { border-color: var(--primary); }
+
+        .mode-toggle {
+            display: flex;
+            gap: 1rem;
+            background: #f8fafc;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .mode-toggle label {
+            cursor: pointer;
+            color: var(--text-main);
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin: 0;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 0.7rem 1rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: all 0.15s ease;
+            width: 100%;
+        }
+        button:hover { opacity: 0.9; }
+
+        .btn-row { display: flex; gap: 0.5rem; }
+        .btn-primary { background-color: var(--primary); color: white; box-shadow: 0 2px 6px rgba(0, 119, 255, 0.2); }
+        .btn-success { background-color: var(--success); color: white; box-shadow: 0 2px 6px rgba(0, 157, 91, 0.2); }
+        .btn-danger { background-color: var(--danger); color: white; box-shadow: 0 2px 6px rgba(227, 0, 53, 0.2); }
+        .btn-secondary { background-color: #f1f5f9; color: var(--slate); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { background-color: #e2e8f0; }
+
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            border: none;
+            margin: 0.25rem 0;
+        }
+
+        .waypoints-list {
+            font-size: 0.75rem;
+            max-height: 100px;
+            overflow-y: auto;
+            color: var(--text-muted);
+            margin-top: 0.4rem;
+        }
+        .waypoints-list div { padding: 0.2rem 0; border-bottom: 1px solid var(--border-color); }
+
+        /* ----- Voice Assistant Modal (Centered Robot + Right Sidebar History) ----- */
+        .voice-modal {
+            display: none; 
+            position: fixed; 
+            inset: 0; 
+            background: rgba(57, 62, 70, 0.75); 
+            z-index: 9999;
+            backdrop-filter: blur(6px);
+            align-items: center; 
+            justify-content: center; 
+            flex-direction: column;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .voice-modal.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .close-modal-btn {
+            position: absolute;
+            top: 2rem;
+            right: 3rem;
+            background: #ffffff;
+            border: none;
+            color: var(--slate);
+            font-size: 1.5rem;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            z-index: 10;
+        }
+        .close-modal-btn:hover { background: #f8fafc; }
+
+        /* Really Big Helio Title Positioned at the Top */
+        .modal-assistant-title {
+            position: absolute;
+            top: 2.5rem;
+            font-size: 3rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: 0.02em;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        /* Centered Main Column for Robot & Captions */
+        .modal-main-column {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-top: 3rem;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        /* Emo Robot Face */
+        .robot-face {
+            background: #0b0f19;
+            width: 280px;
+            height: 140px;
+            border-radius: 28px;
+            display: flex;
+            justify-content: space-evenly;
+            align-items: center;
+            padding: 0 30px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+            border: 2px solid #1f2937;
+            transition: all 0.3s ease;
+        }
+
+        .eye {
+            width: 48px;
+            height: 72px;
+            background: var(--primary);
+            border-radius: 24px;
+            transition: all 0.25s ease;
+            transform-origin: center;
+        }
+
+        .robot-face.listening { border-color: rgba(0, 119, 255, 0.6); box-shadow: 0 0 30px rgba(0, 119, 255, 0.25); }
+        .robot-face.listening .eye { animation: blink 4s infinite; }
+
+        @keyframes blink {
+            0%, 48%, 52%, 100% { transform: scaleY(1); }
+            50% { transform: scaleY(0.1); }
+        }
+
+        .robot-face.thinking { border-color: rgba(227, 0, 53, 0.6); box-shadow: 0 0 30px rgba(227, 0, 53, 0.25); }
+        .robot-face.thinking .eye {
+            background: var(--danger);
+            height: 16px; 
+            border-radius: 8px;
+            animation: think-shift 0.7s infinite alternate ease-in-out;
+        }
+
+        @keyframes think-shift {
+            0% { transform: translateX(-16px); }
+            100% { transform: translateX(16px); }
+        }
+
+        .robot-face.speaking { border-color: rgba(0, 157, 91, 0.6); box-shadow: 0 0 30px rgba(0, 157, 91, 0.25); }
+        .robot-face.speaking .eye {
+            background: var(--success);
+            height: 40px;
+            border-radius: 40px 40px 8px 8px;
+            animation: talk-bounce 0.25s infinite alternate ease-in-out;
+        }
+
+        @keyframes talk-bounce {
+            0% { transform: scaleY(1) translateY(0); }
+            100% { transform: scaleY(1.12) translateY(-4px); }
+        }
+
+        .caption-container {
+            margin-top: 1.5rem;
+            max-width: 500px;
+            text-align: center;
+            min-height: 70px;
+            padding: 0 1rem;
+        }
+        .caption-text {
+            font-size: 1.4rem;
+            color: #ffffff;
+            font-weight: 600;
+            line-height: 1.4;
+            text-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        .caption-status {
+            font-size: 0.75rem;
+            color: #cbd5e1;
+            margin-bottom: 0.3rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 700;
+        }
+
+        /* ----- Session History Pinned to the Far Right Side ----- */
+        .modal-history-column {
+            position: absolute;
+            right: 3rem;
+            top: 6.5rem;
+            bottom: 3rem;
+            width: 360px;
+            background: #0b0f19;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+            z-index: 5;
+        }
+
+        .history-header {
+            padding: 0.75rem 1rem;
+            background: #111827;
+            border-bottom: 1px solid #1f2937;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #cbd5e1;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .history-list {
+            flex: 1;
+            padding: 0.75rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            font-size: 0.85rem;
+        }
+
+        .history-item {
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            line-height: 1.35;
+            word-break: break-word;
+        }
+
+        .history-item.you {
+            background: rgba(0, 119, 255, 0.15);
+            color: #93c5fd;
+            border-left: 3px solid var(--primary);
+            align-self: stretch;
+        }
+
+        .history-item.agent {
+            background: rgba(0, 157, 91, 0.15);
+            color: #86efac;
+            border-left: 3px solid var(--success);
+            align-self: stretch;
+        }
+
+        .history-label {
+            font-weight: 700;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            margin-bottom: 0.15rem;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Voice Assistant Modal Overlay -->
+    <div id="voice-modal" class="voice-modal">
+        <button class="close-modal-btn" onclick="closeVoiceModal()">&times;</button>
+        
+        <!-- Really Big Helio Title at the Top -->
+        <div class="modal-assistant-title">Helio</div>
+
+        <!-- Centered Robot & Captions -->
+        <div class="modal-main-column">
+            <div id="robot-face" class="robot-face listening">
+                <div class="eye"></div>
+                <div class="eye"></div>
+            </div>
+
+            <div class="caption-container">
+                <div id="caption-status" class="caption-status">Listening</div>
+                <div id="caption-text" class="caption-text">Speak now...</div>
+            </div>
+        </div>
+
+        <!-- Session History Panel Pinned to the Right -->
+        <div class="modal-history-column">
+            <div class="history-header">Session History</div>
+            <div id="history-list" class="history-list">
+                <!-- History entries populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Side Navigation -->
+    <aside class="sidebar">
+        <div class="sidebar-top">
+            <div class="brand-container">
+                <div class="brand-logo">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M19 12h-2V8h-2V6H9v2H7v4H5c-1.1 0-2 .9-2 2v6h2v2h2v-2h10v2h2v-6c0-1.1-.9-2-2-2zM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V10h12v1z"/>
+                    </svg>
+                </div>
+                <div class="brand-title">
+                    <h1>Milusions</h1>
+                    <p>WareGV Suite</p>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <a class="nav-item active">
+                    <span>&#9632;</span> Control Center
+                </a>
+                <a class="nav-item" onclick="setClickMode('waypoint')">
+                    <span>&#9679;</span> Waypoint Manager
+                </a>
+                <a class="nav-item" onclick="openVoiceModal()">
+                    <span>✨</span> Helio
+                </a>
+            </nav>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="operator-info">
+                <h4>System Node</h4>
+                <p>Online & Ready</p>
+            </div>
+            <div style="width: 8px; height: 8px; background: var(--success); border-radius: 50%;"></div>
+        </div>
+    </aside>
+
+    <!-- Main Workspace Wrapper -->
+    <div class="main-wrapper">
+        <!-- Top Header Bar -->
+        <header class="header-bar">
+            <div class="header-title">
+                <h2>Autonomous Navigation Dashboard</h2>
+            </div>
+            <div class="header-actions">
+                <span id="ros-status" class="status-badge">Disconnected</span>
+                <button class="header-audio-btn" onclick="openVoiceModal()">
+                    <span>✨</span> Helio
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Content Grid -->
+        <main class="dashboard-content">
+            <!-- Map Workspace -->
+            <section class="map-workspace">
+                <div class="panel-section-title" style="margin-bottom: 0.5rem;">Live SLAM Occupancy Map</div>
+                <div class="map-container" id="map-wrapper">
+                    <div id="map"></div>
+                </div>
+            </section>
+
+            <!-- Control Panel Workspace -->
+            <aside class="control-panel">
+                <div>
+                    <div class="panel-section-title">Navigation Mode</div>
+                    <div class="mode-toggle" style="margin-top: 0.4rem;">
+                        <label>
+                            <input type="radio" name="click_mode" value="single" checked onchange="setClickMode('single')"> 
+                            Single Target
+                        </label>
+                        <label>
+                            <input type="radio" name="click_mode" value="waypoint" onchange="setClickMode('waypoint')"> 
+                            Waypoints Mode
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="panel-section-title">Target Coordinates</div>
+                    <div class="coords-box" style="margin-top: 0.4rem;">
+                        X: <span id="lbl-x">0.00</span> | Y: <span id="lbl-y">0.00</span> | Yaw: <span id="lbl-yaw">0.00</span>&deg;
+                        <div id="waypoints-container" class="waypoints-list" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <div>
+                        <label>X Target</label>
+                        <input type="number" id="target-x" step="0.1" value="0.0" onchange="updateSingleFromInputs()">
+                    </div>
+                    <div>
+                        <label>Y Target</label>
+                        <input type="number" id="target-y" step="0.1" value="0.0" onchange="updateSingleFromInputs()">
+                    </div>
+                    <div>
+                        <label>Yaw (deg)</label>
+                        <input type="number" id="target-yaw" step="1" value="0" onchange="updateSingleFromInputs()">
+                    </div>
+                </div>
+
+                <!-- Action Controls -->
+                <div class="btn-row" id="single-actions">
+                    <button class="btn-primary" onclick="sendGoalPose()">Navigate to Pose</button>
+                    <button class="btn-secondary" onclick="sendInitialPose()">Set Initial</button>
+                </div>
+
+                <div class="btn-row" id="waypoint-actions" style="display: none;">
+                    <button class="btn-success" onclick="sendWaypoints()">Follow Waypoints</button>
+                </div>
+
+                <div class="btn-row">
+                    <button class="btn-secondary" onclick="clearMarkers()">Clear Canvas</button>
+                    <button class="btn-danger" onclick="sendAbort()">ABORT MISSION</button>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <script>
+        // ---- ROS Connection & Mapping Logic ----
+        const ros = new ROSLIB.Ros({
+            url: 'ws://' + window.location.hostname + ':9090'
+        });
+
+        const statusEl = document.getElementById('ros-status');
+
+        ros.on('connection', () => {
+            statusEl.textContent = 'ROS Connected';
+            statusEl.classList.add('connected');
+            initMap();
+        });
+        ros.on('error', (error) => {
+            statusEl.textContent = 'Connection Error';
+            statusEl.classList.remove('connected');
+        });
+        ros.on('close', () => {
+            statusEl.textContent = 'Disconnected';
+            statusEl.classList.remove('connected');
+        });
+
+        let viewer, gridClient;
+        const ROTATE_CLOCKWISE = false;
+        let clickMode = 'single';
+        let isDragging = false;
+        let dragStartRos = null;
+        let activeArrow = null;
+        let singleArrowMarker = null;
+        let waypointMarkers = [];
+        let waypointsData = [];
+
+        function setClickMode(mode) {
+            clickMode = mode;
+            document.getElementById('single-actions').style.display = mode === 'single' ? 'flex' : 'none';
+            document.getElementById('waypoint-actions').style.display = mode === 'waypoint' ? 'flex' : 'none';
+            document.getElementById('waypoints-container').style.display = mode === 'waypoint' ? 'block' : 'none';
+        }
+
+        function getRosCoordsFromEvent(evt, container) {
+            const rect = container.getBoundingClientRect();
+            const rx = evt.clientX - rect.left;
+            const ry = evt.clientY - rect.top;
+            const visualW = rect.width;
+            const visualH = rect.height;
+
+            let localX, localY;
+            if (ROTATE_CLOCKWISE) {
+                localX = ry;
+                localY = visualW - rx;
+            } else {
+                localX = visualH - ry;
+                localY = rx;
+            }
+            const rosPos = viewer.scene.globalToRos(localX, localY);
+            return { x: rosPos.x, y: rosPos.y };
+        }
+
+        function createCustomMarker(rosX, rosY, yawDeg, color, labelText) {
+            const container = new createjs.Container();
+            container.x = rosX;
+            container.y = -rosY; 
+            container.rotation = -yawDeg;
+
+            const dot = new createjs.Shape();
+            dot.graphics.beginFill(color).drawCircle(0, 0, 0.15); 
+            container.addChild(dot);
+
+            const arrow = new createjs.Shape();
+            arrow.graphics.setStrokeStyle(0.08, "round").beginStroke(color);
+            arrow.graphics.moveTo(0.15, 0).lineTo(0.8, 0);
+            arrow.graphics.beginFill(color).moveTo(1.0, 0).lineTo(0.7, -0.25).lineTo(0.7, 0.25).closePath();
+            container.addChild(arrow);
+
+            if (labelText) {
+                const text = new createjs.Text(labelText, "bold 0.6px sans-serif", color);
+                text.textAlign = "center";
+                text.textBaseline = "middle";
+                text.regY = 0.5; 
+                text.rotation = yawDeg + 90; 
+                container.textLabel = text;
+                container.addChild(text);
+            }
+
+            viewer.scene.addChild(container);
+            return container;
+        }
+
+        function initMap() {
+            const container = document.getElementById('map-wrapper');
+            const mapDiv = document.getElementById('map');
+
+            const canvasW = container.clientHeight; 
+            const canvasH = container.clientWidth;  
+            mapDiv.style.width = canvasW + 'px';
+            mapDiv.style.height = canvasH + 'px';
+
+            viewer = new ROS2D.Viewer({
+                divID: 'map',
+                width: canvasW,
+                height: canvasH
+            });
+
+            gridClient = new ROS2D.OccupancyGridClient({
+                ros: ros,
+                rootObject: viewer.scene,
+                continuous: true
+            });
+
+            gridClient.on('change', () => {
+                viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
+                viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
+            });
+
+            const resizeObserver = new ResizeObserver(() => {
+                if (viewer && viewer.scene && viewer.scene.canvas) {
+                    const newCanvasW = container.clientHeight;
+                    const newCanvasH = container.clientWidth;
+                    mapDiv.style.width = newCanvasW + 'px';
+                    mapDiv.style.height = newCanvasH + 'px';
+                    viewer.scene.canvas.width = newCanvasW;
+                    viewer.scene.canvas.height = newCanvasH;
+                    viewer.width = newCanvasW;
+                    viewer.height = newCanvasH;
+                    if (gridClient && gridClient.currentGrid) {
+                        viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
+                        viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
+                    }
+                }
+            });
+            resizeObserver.observe(container);
+
+            container.addEventListener('pointerdown', (evt) => {
+                if (!gridClient.currentGrid) return;
+                container.setPointerCapture(evt.pointerId);
+                isDragging = true;
+                
+                dragStartRos = getRosCoordsFromEvent(evt, container);
+                
+                const arrowColor = clickMode === 'single' ? '#0077ff' : '#E30035';
+                const label = clickMode === 'waypoint' ? String(waypointsData.length + 1) : "T";
+                
+                activeArrow = createCustomMarker(dragStartRos.x, dragStartRos.y, 0, arrowColor, label);
+                activeArrow.currentYawDeg = 0; 
+            });
+
+            container.addEventListener('pointermove', (evt) => {
+                if (!isDragging || !activeArrow) return;
+                
+                const currentRos = getRosCoordsFromEvent(evt, container);
+                const dx = currentRos.x - dragStartRos.x;
+                const dy = currentRos.y - dragStartRos.y;
+
+                if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
+                    const yawRad = Math.atan2(dy, dx);
+                    const yawDeg = yawRad * (180 / Math.PI);
+                    
+                    activeArrow.currentYawDeg = yawDeg;
+                    activeArrow.rotation = -yawDeg; 
+                    if (activeArrow.textLabel) {
+                        activeArrow.textLabel.rotation = yawDeg + 90;
+                    }
+                }
+            });
+
+            container.addEventListener('pointerup', (evt) => {
+                if (!isDragging) return;
+                isDragging = false;
+                container.releasePointerCapture(evt.pointerId);
+
+                const finalX = dragStartRos.x;
+                const finalY = dragStartRos.y;
+                const finalYaw = activeArrow.currentYawDeg;
+
+                if (clickMode === 'single') {
+                    if (singleArrowMarker) {
+                        viewer.scene.removeChild(singleArrowMarker);
+                    }
+                    singleArrowMarker = activeArrow;
+                    updateUIInputs(finalX, finalY, finalYaw);
+                } else {
+                    waypointMarkers.push(activeArrow);
+                    waypointsData.push({ x: finalX, y: finalY, yaw: finalYaw });
+                    updateWaypointsUI();
+                }
+
+                activeArrow = null;
+            });
+        }
+
+        function updateUIInputs(x, y, yaw) {
+            document.getElementById('target-x').value = x.toFixed(2);
+            document.getElementById('target-y').value = y.toFixed(2);
+            document.getElementById('target-yaw').value = yaw.toFixed(2);
+            document.getElementById('lbl-x').textContent = x.toFixed(2);
+            document.getElementById('lbl-y').textContent = y.toFixed(2);
+            document.getElementById('lbl-yaw').textContent = yaw.toFixed(2);
+        }
+
+        function updateSingleFromInputs() {
+            const x = parseFloat(document.getElementById('target-x').value) || 0;
+            const y = parseFloat(document.getElementById('target-y').value) || 0;
+            const yaw = parseFloat(document.getElementById('target-yaw').value) || 0;
+
+            document.getElementById('lbl-x').textContent = x.toFixed(2);
+            document.getElementById('lbl-y').textContent = y.toFixed(2);
+            document.getElementById('lbl-yaw').textContent = yaw.toFixed(2);
+
+            if (viewer && viewer.scene) {
+                if (singleArrowMarker) viewer.scene.removeChild(singleArrowMarker);
+                singleArrowMarker = createCustomMarker(x, y, yaw, '#0077ff', "T");
+            }
+        }
+
+        function updateWaypointsUI() {
+            const container = document.getElementById('waypoints-container');
+            container.innerHTML = waypointsData.length === 0 ? "<em>No waypoints added.</em>" : "";
+            
+            waypointsData.forEach((wp, index) => {
+                const div = document.createElement('div');
+                div.innerHTML = `<strong>WP ${index + 1}:</strong> X:${wp.x.toFixed(2)} Y:${wp.y.toFixed(2)} Yaw:${wp.yaw.toFixed(0)}&deg;`;
+                container.appendChild(div);
+            });
+        }
+
+        function clearMarkers() {
+            if (viewer && viewer.scene) {
+                if (singleArrowMarker) {
+                    viewer.scene.removeChild(singleArrowMarker);
+                    singleArrowMarker = null;
+                }
+                waypointMarkers.forEach(marker => viewer.scene.removeChild(marker));
+                waypointMarkers = [];
+                waypointsData = [];
+                updateWaypointsUI();
+            }
+        }
+
+        // ---- HTTP Action Dispatchers ----
+        function yawDegToQuaternion(yawDeg) {
+            const yawRad = (yawDeg * Math.PI) / 180;
+            return { yaw_z: Math.sin(yawRad / 2), yaw_w: Math.cos(yawRad / 2) };
+        }
+
+        async function sendGoalPose() {
+            const x = parseFloat(document.getElementById('target-x').value);
+            const y = parseFloat(document.getElementById('target-y').value);
+            const yawDeg = parseFloat(document.getElementById('target-yaw').value) || 0;
+            const q = yawDegToQuaternion(yawDeg);
+            try {
+                await fetch('/navigate_to_pose', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x: x, y: y, yaw_w: q.yaw_w })
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        async function sendInitialPose() {
+            const x = parseFloat(document.getElementById('target-x').value);
+            const y = parseFloat(document.getElementById('target-y').value);
+            const yawDeg = parseFloat(document.getElementById('target-yaw').value) || 0;
+            const q = yawDegToQuaternion(yawDeg);
+            try {
+                await fetch('/set_initial_pose', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x: x, y: y, yaw_w: q.yaw_w })
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        async function sendWaypoints() {
+            if (waypointsData.length === 0) return;
+            const waypoints = waypointsData.map(wp => {
+                const q = yawDegToQuaternion(wp.yaw);
+                return { x: wp.x, y: wp.y, yaw_w: q.yaw_w };
+            });
+            try {
+                await fetch('/follow_waypoints', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ waypoints: waypoints })
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        async function sendAbort() {
+            try {
+                await fetch('/abort', { method: 'POST' });
+            } catch (err) { console.error(err); }
+        }
+
+
+        // ---- Web Audio API - Emo Sound FX ----
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playStartupSound() {
+            try {
+                initAudio();
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+                gain.gain.setValueAtTime(0.06, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            } catch (e) { console.log(e); }
+        }
+
+        function playListenSound() {
+            try {
+                initAudio();
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, now);
+                osc.frequency.setValueAtTime(880, now + 0.08);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            } catch (e) { console.log(e); }
+        }
+
+        function playProcessingSound() {
+            try {
+                initAudio();
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.linearRampToValueAtTime(160, now + 0.1);
+                gain.gain.setValueAtTime(0.04, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.12);
+            } catch (e) { console.log(e); }
+        }
+
+
+        // ---- Helio Voice Agent Logic (Looping + History Tracking) ----
+        const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let inactivityTimer = null;
+        let currentCallId = null; 
+        
+        const modal = document.getElementById('voice-modal');
+        const robotFace = document.getElementById('robot-face');
+        const captionStatus = document.getElementById('caption-status');
+        const captionText = document.getElementById('caption-text');
+        const historyListEl = document.getElementById('history-list');
+        
+        let agentState = 'idle'; 
+        window.currentUtterance = null;
+
+        function appendHistory(sender, text) {
+            const item = document.createElement('div');
+            item.className = `history-item ${sender}`; // 'you' or 'agent'
+            
+            const label = document.createElement('div');
+            label.className = 'history-label';
+            label.textContent = sender === 'you' ? 'you:' : 'agent:';
+            
+            const content = document.createElement('div');
+            content.textContent = text;
+            
+            item.appendChild(label);
+            item.appendChild(content);
+            historyListEl.appendChild(item);
+            historyListEl.scrollTop = historyListEl.scrollHeight;
+        }
+
+        if (SpeechRecognitionImpl) {
+            recognition = new SpeechRecognitionImpl();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                agentState = 'listening';
+                setRobotMood('listening', 'Listening', 'Speak your command...');
+                playListenSound();
+
+                if (inactivityTimer) clearTimeout(inactivityTimer);
+                inactivityTimer = setTimeout(() => {
+                    if (agentState === 'listening') {
+                        const text = captionText.textContent.trim();
+                        if (text === '' || text === 'Speak now...' || text === 'Listening...' || text === 'Listening for next command...') {
+                            closeVoiceModal();
+                        }
+                    }
+                }, 6000);
+            };
+
+            recognition.onerror = (e) => {
+                if (agentState === 'listening') {
+                    setRobotMood('listening', 'Error', `Voice error: ${e.error}`);
+                    setTimeout(closeVoiceModal, 3000);
+                }
+            };
+
+            recognition.onresult = (event) => {
+                if (agentState !== 'listening') return;
+                
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                
+                const currentText = finalTranscript || interimTranscript;
+                if (currentText.trim().length > 0) {
+                    captionText.textContent = currentText;
+                    if (inactivityTimer) clearTimeout(inactivityTimer);
+                }
+
+                if (finalTranscript.trim().length > 0) {
+                    const finalMsg = finalTranscript.trim();
+                    appendHistory('you', finalMsg);
+                    processVoiceCommand(finalMsg);
+                }
+            };
+
+            recognition.onend = () => {
+                if (agentState === 'listening') {
+                    const text = captionText.textContent.trim();
+                    if (text === '' || text === 'Speak now...' || text === 'Listening...' || text === 'Listening for next command...') {
+                        closeVoiceModal();
+                    }
+                }
+            };
+        } else {
+            console.warn('Speech Recognition not supported in this browser.');
+        }
+
+        function setRobotMood(className, statusMsg, captionMsg) {
+            robotFace.className = 'robot-face ' + className;
+            if (statusMsg !== null) captionStatus.textContent = statusMsg;
+            if (captionMsg !== null) captionText.textContent = captionMsg;
+        }
+
+        function openVoiceModal() {
+            if (!recognition) return alert("Voice not supported on this browser.");
+            modal.classList.add('active');
+            playStartupSound();
+            
+            // Generate a random 3-digit string call_id on open
+            if (!currentCallId) {
+                currentCallId = String(Math.floor(Math.random() * 900) + 100);
+            }
+
+            try {
+                recognition.start();
+            } catch(e) { console.log(e); }
+        }
+
+        function closeVoiceModal() {
+            agentState = 'idle';
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            modal.classList.remove('active');
+            
+            // Clear session history and call_id when popup is closed
+            currentCallId = null;
+            historyListEl.innerHTML = '';
+
+            if (recognition) {
+                try { recognition.stop(); } catch(e){}
+            }
+            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        }
+
+        async function processVoiceCommand(text) {
+            agentState = 'thinking';
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            try { recognition.stop(); } catch(e){}
+            
+            setRobotMood('thinking', 'Processing', text);
+            playProcessingSound();
+
+            try {
+                const response = await fetch('http://localhost:8001/agentic/waregv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, call_id: currentCallId })
+                });
+
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+
+                const data = await response.json();
+                const agentResponseText = data.output || "I didn't receive a valid response.";
+                
+                appendHistory('agent', agentResponseText);
+                speakAndLoop(agentResponseText);
+
+            } catch (err) {
+                setRobotMood('listening', 'Connection Error', err.message);
+                setTimeout(closeVoiceModal, 3000);
+            }
+        }
+
+        function speakAndLoop(text) {
+            agentState = 'speaking';
+            setRobotMood('speaking', 'Response', text);
+
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'en-US';
+                utterance.rate = 1.0;
+                
+                utterance.onend = () => {
+                    if (modal.classList.contains('active')) {
+                        agentState = 'listening';
+                        setRobotMood('listening', 'Listening', 'Listening for next command...');
+                        try {
+                            recognition.start();
+                        } catch (e) { console.log(e); }
+                    }
+                };
+
+                window.currentUtterance = utterance;
+                window.speechSynthesis.speak(utterance);
+            } else {
+                setTimeout(closeVoiceModal, 4000);
+            }
+        }
+    </script>
+</body>
+</html>
