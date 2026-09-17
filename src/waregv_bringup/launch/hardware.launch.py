@@ -75,7 +75,7 @@ def generate_launch_description():
         package='waregv_heartbeat',
         executable='heartbeat_light',
         name='heartbeat_light',
-            parameters=[{'use_sim_time': use_sim_time}],
+            parameters=[{'use_sim_time': False}],
        
     )
     
@@ -90,6 +90,14 @@ def generate_launch_description():
               "wheel_radius": wheel_radius_conf,
                 "wheel_base": wheel_base_conf
         }.items() 
+    )
+    
+    
+    waregv_description_launch_file_path = os.path.join(get_package_share_directory("waregv_description"), 'launch', 'driver.launch.py')
+    
+    waregv_description = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_description_launch_file_path),
+        launch_arguments={"use_sim_time":use_sim_time}.items() 
     )
     
     waregv_driver_launch_file_path = os.path.join(get_package_share_directory("waregv_driver"), 'launch', 'driver.launch.py')
@@ -138,6 +146,7 @@ def generate_launch_description():
         wheel_base_arg,
         heartbeat_light,
         foxglove_bridge,
+        waregv_description,
         rosbridge_node,
         waregv_driver,
         twist_mux_node,
