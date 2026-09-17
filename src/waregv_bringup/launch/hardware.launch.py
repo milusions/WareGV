@@ -93,7 +93,7 @@ def generate_launch_description():
     )
     
     
-    waregv_description_launch_file_path = os.path.join(get_package_share_directory("waregv_description"), 'launch', 'driver.launch.py')
+    waregv_description_launch_file_path = os.path.join(get_package_share_directory("waregv_description"), 'launch', 'urdf.launch.py')
     
     waregv_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_description_launch_file_path),
