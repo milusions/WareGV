@@ -32,17 +32,22 @@ def generate_launch_description():
 
     use_sim_time = 'false' 
     
-    rosbridge_dir = get_package_share_directory('rosbridge_server')
-    
-    rosbridge_node = IncludeLaunchDescription(
-        FrontendLaunchDescriptionSource(
-            os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
-        ),
-
-        launch_arguments={
-            'port': '9090',
-            'ssl': 'false'
-        }.items()
+    foxglove_node = Node(
+        package='foxglove_bridge',
+        executable='foxglove_bridge',
+        name='foxglove_bridge',
+        output='screen',
+        parameters=[{
+            'port': 8765,
+            'address': '0.0.0.0',
+            # Increase send_buffer_limit for dense Nav2 costmaps and SLAM pointclouds
+            'send_buffer_limit': 10000000, 
+            'use_sim_time': False,
+            # Optional: You can restrict which topics Foxglove sees to save Pi CPU
+            'topic_whitelist': ['.*'], 
+            'service_whitelist': ['.*'],
+            'client_topic_whitelist': ['.*'],
+        }]
     )
     
     twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, 'config', 'twist_mux.yaml')
@@ -121,7 +126,7 @@ def generate_launch_description():
         wheel_radius_arg,
         wheel_base_arg,
         heartbeat_light,
-        rosbridge_node,
+        foxglove_node,
         waregv_driver,
         twist_mux_node,
         waregv_odometry,
