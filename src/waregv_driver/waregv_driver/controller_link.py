@@ -94,7 +94,7 @@ class ControllerLink(Node):
 
     def cmd_callback(self, msg):
         """
-        Receives array of commands, extracts raw left/right, applies custom turn logic, 
+        Receives array of commands, extracts raw left/right, applies custom inverted turn logic, 
         and sends directly to Arduino.
         """
         if not (self.ser and self.ser.is_open):
@@ -116,14 +116,13 @@ class ControllerLink(Node):
         lw = float(raw_vals[0])
         rw = float(raw_vals[1])
 
-        # --- Custom Single-Wheel Turning Logic ---
-        # If the intended turn is left, rw > lw. If intended turn is right, lw > rw.
+        # --- Custom Inverted Turning Logic (Point Turns) ---
         if (rw - lw) > 0.01:
-            # Turning Left: Turn left motor fully off
-            lw = 0.0
+            # Turning Left: Left motor gets the inverted value of the right motor
+            lw = -rw
         elif (lw - rw) > 0.01:
-            # Turning Right: Turn right motor fully off
-            rw = 0.0
+            # Turning Right: Right motor gets the inverted value of the left motor
+            rw = -lw
 
         # Build clean JSON packet
         json_str = f'{{"rw":{rw:.3f},"lw":{lw:.3f}}}\n'
