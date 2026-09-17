@@ -5,21 +5,6 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
-export DISPLAY=:0
-export XAUTHORITY=$HOME/.Xauthority
-
-echo "Waiting for X11 Display Server ($DISPLAY)..."
-for i in {1..30}; do
-    if xset q &>/dev/null; then
-        echo "Display server detected successfully."
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo "Warning: Display server not found. Gazebo may fail if GUI is enabled."
-    fi
-    sleep 1
-done
-
 echo "Allowing system resources 5 seconds to settle..."
 sleep 5
 
