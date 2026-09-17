@@ -41,9 +41,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-                            #   ydlidar_node,
+                              ydlidar_node,
                               controller_link,
-                            #   motor_encoder,
+                              motor_encoder,
                               imu,
                               
                              ])

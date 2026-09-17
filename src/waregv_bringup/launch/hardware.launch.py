@@ -136,7 +136,7 @@ def generate_launch_description():
         max_angular_velocity_arg,
         wheel_radius_arg,
         wheel_base_arg,
-        # heartbeat_light,
+        heartbeat_light,
         foxglove_bridge,
         rosbridge_node,
         waregv_driver,

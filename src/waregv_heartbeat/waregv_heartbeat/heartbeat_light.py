@@ -4,26 +4,33 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import Imu, LaserScan
 from std_msgs.msg import String 
-# Imported GoalStatus along with GoalStatusArray
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from gpiozero import LED
 
 class RobotStatusGpioController(Node):
     def __init__(self):
         super().__init__('robot_status_gpio_controller')
+        
+        # Initialize pins (Ensure proper hardware permissions or mock factory are set)
         self.pin_data_status = LED(23)
         self.pin_nav_status = LED(24)
 
         self.data_timeout_sec = 2.0
-        self.last_telemetry_time = Time(seconds=0, nanoseconds=0)
-        self.last_imu_time = Time(seconds=0, nanoseconds=0)
-        self.last_scan_time = Time(seconds=0, nanoseconds=0)
+        
+        # FIXED: Initialize to the Node's native ROS clock type to prevent 
+        # "Cannot add/subtract time types" runtime exceptions.
+        now = self.get_clock().now()
+        self.last_telemetry_time = now
+        self.last_imu_time = now
+        self.last_scan_time = now
 
+        # Subscriptions
         self.create_subscription(String, '/controller/telemetry', self.telemetry_callback, 10)
         self.create_subscription(Imu, '/imu', self.imu_callback, 10)
         self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.create_subscription(GoalStatusArray, '/navigate_to_pose/_action/status', self.nav_status_callback, 10)
 
+        # Health monitoring timer
         self.create_timer(0.1, self.check_data_freshness)
 
     def telemetry_callback(self, msg):
@@ -37,6 +44,8 @@ class RobotStatusGpioController(Node):
 
     def check_data_freshness(self):
         now = self.get_clock().now()
+        
+        # Math is now valid because both 'now' and 'last_*_time' share ClockType.ROS_TIME
         dt_telemetry = (now - self.last_telemetry_time).nanoseconds / 1e9
         dt_imu = (now - self.last_imu_time).nanoseconds / 1e9
         dt_scan = (now - self.last_scan_time).nanoseconds / 1e9
@@ -53,7 +62,6 @@ class RobotStatusGpioController(Node):
     def nav_status_callback(self, msg):
         is_navigating = False
         for status in msg.status_list:
-            # Fixed the condition to check for active execution states
             if status.status in [GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING]:
                 is_navigating = True
                 break
@@ -73,8 +81,15 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.pin_data_status.off()
-        node.pin_nav_status.off()
+        # Wrap GPIO cleanup securely to avoid masking ROS shutdown routines if hardware is missing
+        try:
+            node.pin_data_status.off()
+            node.pin_nav_status.off()
+            node.pin_data_status.close()
+            node.pin_nav_status.close()
+        except Exception:
+            pass
+            
         node.destroy_node()
         rclpy.shutdown()
 
