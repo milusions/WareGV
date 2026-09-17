@@ -20,15 +20,15 @@ class ControllerLink(Node):
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
         
-        # Explicit max velocity configuration (8 rad/s -> 1.0)
-        self.declare_parameter('max_rad_sec', 8.0)
+        # Explicit max velocity configuration (14.0 rad/s -> 1.0)
+        self.declare_parameter('max_rad_sec', 14.0)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
         self.max_rad_sec = float(self.get_parameter('max_rad_sec').value)
 
         if self.max_rad_sec <= 0:
-            self.max_rad_sec = 8.0  # Safe fallback
+            self.max_rad_sec = 14.0  # Safe fallback
 
         self.get_logger().info(f"[INIT] Max Rad/Sec set to {self.max_rad_sec:.2f} (Maps {self.max_rad_sec:.1f} rad/s -> 1.0)")
 
@@ -74,7 +74,10 @@ class ControllerLink(Node):
         self.read_thread.start()
 
     def cmd_callback(self, msg):
-        """Receives array of 4 floats: [right_front, right_rear, left_front, left_rear] in rad/s"""
+        """
+        Receives array of 4 floats from ROS controller:
+        Typical ROS 2 Skid-Steer order: [left_front, right_front, left_rear, right_rear]
+        """
         if not (self.ser and self.ser.is_open):
             self.get_logger().warn("[CMD DROP] Serial port is not open.")
             return
@@ -91,19 +94,20 @@ class ControllerLink(Node):
             self.get_logger().error(f"[CMD ERROR] Expected >= 4 commands, received {len(raw_vals)}.")
             return
 
-        # Maps input rad/sec to [-1.0, 1.0] range (8.0 rad/s = 1.0, -8.0 rad/s = -1.0)
-        def normalize_and_clamp(rad_sec_val):
-            normalized = rad_sec_val / self.max_rad_sec
+        # Maps input rad/sec to [-1.0, 1.0] range based on max 14.0 rad/s limit
+        def normalize_and_clamp_inverted(rad_sec_val):
+            normalized = -1.0 * (rad_sec_val / self.max_rad_sec)
             return max(-1.0, min(1.0, float(normalized)))
 
-        rf = normalize_and_clamp(raw_vals[0])
-        rr = normalize_and_clamp(raw_vals[1])
-        lf = normalize_and_clamp(raw_vals[2])
-        lr = normalize_and_clamp(raw_vals[3])
+        # Standard ROS 2 Skid-Steer mapping with inverted direction logic
+        lf = normalize_and_clamp_inverted(raw_vals[0])
+        rf = normalize_and_clamp_inverted(raw_vals[1])
+        lr = normalize_and_clamp_inverted(raw_vals[2])
+        rr = normalize_and_clamp_inverted(raw_vals[3])
 
         json_str = f'{{"rf":{rf:.3f},"rr":{rr:.3f},"lf":{lf:.3f},"lr":{lr:.3f}}}\n'
         
-        self.get_logger().info(f"[TX ARDUINO] Scaled [-1, 1]: [RF: {rf:.3f}, RR: {rr:.3f}, LF: {lf:.3f}, LR: {lr:.3f}]")
+        self.get_logger().info(f"[TX ARDUINO] Scaled [-1, 1]: [LF: {lf:.3f}, RF: {rf:.3f}, LR: {lr:.3f}, RR: {rr:.3f}]")
 
         try:
             with self.write_lock:
@@ -150,7 +154,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         if rclpy.ok():
-            rclpy.shutdown() 
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
