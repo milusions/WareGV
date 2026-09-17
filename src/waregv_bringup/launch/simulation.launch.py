@@ -41,7 +41,7 @@ def generate_launch_description():
     
     rosbridge_dir = get_package_share_directory('rosbridge_server')
     
-
+ 
     rosbridge_node = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(
             os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')

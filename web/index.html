@@ -1889,9 +1889,9 @@
             
             setRobotMood('thinking', 'Processing', text);
             playProcessingSound();
-
+  
             try {
-                const response = await fetch('http://localhost:8001/agentic/waregv', {
+                const response = await fetch('http://'+window.location.hostname+':8001/agentic/waregv', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: text, call_id: currentCallId })
