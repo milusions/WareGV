@@ -4,7 +4,8 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import Imu, LaserScan
 from std_msgs.msg import String 
-from action_msgs.msg import GoalStatusArray
+# Imported GoalStatus along with GoalStatusArray
+from action_msgs.msg import GoalStatus, GoalStatusArray
 from gpiozero import LED
 
 class RobotStatusGpioController(Node):
@@ -52,7 +53,8 @@ class RobotStatusGpioController(Node):
     def nav_status_callback(self, msg):
         is_navigating = False
         for status in msg.status_list:
-            if status.status in:
+            # Fixed the condition to check for active execution states
+            if status.status in [GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING]:
                 is_navigating = True
                 break
 
