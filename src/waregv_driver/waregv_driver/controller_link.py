@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray, String
-from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy
+import math
 import serial
+import sys
 import threading
 import time
-import sys
-import math
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from std_msgs.msg import Float64MultiArray, String
 
 
 class ControllerLink(Node):
@@ -18,28 +19,31 @@ class ControllerLink(Node):
         # Parameters
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
-        self.declare_parameter('max_rpm', 550.0)
+        
+        # Explicit max velocity configuration (8 rad/s -> 1.0)
+        self.declare_parameter('max_rad_sec', 8.0)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
-        max_rpm = self.get_parameter('max_rpm').value
+        self.max_rad_sec = float(self.get_parameter('max_rad_sec').value)
 
-        # Calculate max rad/sec limit based on max RPM
-        # RPM to Rad/Sec formula: RPM * (2 * PI / 60)
-        self.max_rad_sec = max_rpm * (2.0 * math.pi / 60.0)
-        self.get_logger().info(f"Max RPM set to {max_rpm}, equivalent to {self.max_rad_sec:.2f} rad/sec")
+        if self.max_rad_sec <= 0:
+            self.max_rad_sec = 8.0  # Safe fallback
+
+        self.get_logger().info(f"[INIT] Max Rad/Sec set to {self.max_rad_sec:.2f} (Maps {self.max_rad_sec:.1f} rad/s -> 1.0)")
 
         # --- Rate Limiter Variables ---
         self.last_cmd_time = 0.0
-        self.min_cmd_interval = 1.0 / 30.0  # Cap at 30Hz (Arduino PID is 20Hz)
+        self.min_cmd_interval = 1.0 / 30.0  # Cap output at 30Hz
 
         # Publishers
         self.telemetry_pub = self.create_publisher(String, '/controller/telemetry', 10)
 
+        # Matched RELIABLE QoS Profile to avoid message drop during sharp turns
         qos_profile = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT
+            depth=10,
+            reliability=ReliabilityPolicy.RELIABLE
         )
 
         self.cmd_sub = self.create_subscription(
@@ -54,24 +58,25 @@ class ControllerLink(Node):
         self.ser = None
 
         # --- Port Connection Logic ---
-        self.get_logger().info(f"Attempting to connect directly to {self.port}...")
+        self.get_logger().info(f"[SERIAL] Connecting to {self.port} at {self.baudrate} baud...")
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
-            time.sleep(2.0)  # Wait for Arduino bootloader
+            time.sleep(2.0)  # Wait for Arduino bootloader reset
             self.ser.reset_input_buffer()
             self.ser.reset_output_buffer()
-            self.get_logger().info(f"SUCCESS: Connected to Arduino on {self.port}")
+            self.get_logger().info(f"[SERIAL] SUCCESS: Connected on {self.port}")
         except serial.SerialException as e:
-            self.get_logger().error(f"FATAL: Failed to connect to {self.port}: {e}")
+            self.get_logger().error(f"[SERIAL] FATAL: Failed to connect to {self.port}: {e}")
             sys.exit(1)
 
-        # Background thread
+        # Background thread for incoming telemetry
         self.read_thread = threading.Thread(target=self.serial_read_loop, daemon=True)
         self.read_thread.start()
 
     def cmd_callback(self, msg):
         """Receives array of 4 floats: [right_front, right_rear, left_front, left_rear] in rad/s"""
         if not (self.ser and self.ser.is_open):
+            self.get_logger().warn("[CMD DROP] Serial port is not open.")
             return
 
         current_time = time.time()
@@ -79,27 +84,33 @@ class ControllerLink(Node):
             return
         self.last_cmd_time = current_time
 
-        if len(msg.data) >= 4:
-            # Helper function to convert rad/sec into a -1.0 to 1.0 range
-            def normalize_velocity(rad_sec_val):
-                # Scale the velocity relative to the max_rad_sec
-                normalized = rad_sec_val / self.max_rad_sec
-                # Clamp the output between -1.0 (full reverse) and 1.0 (full forward)
-                return max(-1.0, min(1.0, normalized))
+        raw_vals = msg.data
+        self.get_logger().info(f"[RAW CMD] Data rad/s: {[round(v, 2) for v in raw_vals]}")
 
-            rf = normalize_velocity(msg.data[0])
-            rr = normalize_velocity(msg.data[1])
-            lf = normalize_velocity(msg.data[2])
-            lr = normalize_velocity(msg.data[3])
+        if len(raw_vals) < 4:
+            self.get_logger().error(f"[CMD ERROR] Expected >= 4 commands, received {len(raw_vals)}.")
+            return
 
-            json_str = f'{{"rf":{rf:.3f},"rr":{rr:.3f},"lf":{lf:.3f},"lr":{lr:.3f}}}\n'
-            
-            try:
-                with self.write_lock:
-                    self.ser.write(json_str.encode('utf-8'))
-                    self.ser.flush()
-            except Exception as e:
-                self.get_logger().error(f"Write error: {e}")
+        # Maps input rad/sec to [-1.0, 1.0] range (8.0 rad/s = 1.0, -8.0 rad/s = -1.0)
+        def normalize_and_clamp(rad_sec_val):
+            normalized = rad_sec_val / self.max_rad_sec
+            return max(-1.0, min(1.0, float(normalized)))
+
+        rf = normalize_and_clamp(raw_vals[0])
+        rr = normalize_and_clamp(raw_vals[1])
+        lf = normalize_and_clamp(raw_vals[2])
+        lr = normalize_and_clamp(raw_vals[3])
+
+        json_str = f'{{"rf":{rf:.3f},"rr":{rr:.3f},"lf":{lf:.3f},"lr":{lr:.3f}}}\n'
+        
+        self.get_logger().info(f"[TX ARDUINO] Scaled [-1, 1]: [RF: {rf:.3f}, RR: {rr:.3f}, LF: {lf:.3f}, LR: {lr:.3f}]")
+
+        try:
+            with self.write_lock:
+                self.ser.write(json_str.encode('utf-8'))
+                self.ser.flush()
+        except Exception as e:
+            self.get_logger().error(f"[TX ERROR] Failed writing to serial: {e}")
 
     def serial_read_loop(self):
         while self.running and rclpy.ok():
@@ -109,12 +120,11 @@ class ControllerLink(Node):
                     if line.startswith('{') and line.endswith('}'):
                         msg = String()
                         msg.data = line
-                     
                         self.telemetry_pub.publish(msg)
                 except UnicodeDecodeError:
                     pass
                 except Exception as e:
-                    self.get_logger().error(f"Read error: {e}")
+                    self.get_logger().error(f"[RX ERROR] Serial read failed: {e}")
 
     def destroy_node(self):
         self.running = False
@@ -140,7 +150,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         if rclpy.ok():
-            rclpy.shutdown()
+            rclpy.shutdown() 
 
 
 if __name__ == '__main__':
