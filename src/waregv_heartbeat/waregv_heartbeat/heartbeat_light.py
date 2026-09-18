@@ -3,21 +3,22 @@ import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import Imu, LaserScan
-from std_msgs.msg import String 
+from std_msgs.msg import String, Bool
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from gpiozero import LED
 
 class RobotStatusGpioController(Node):
     def __init__(self):
         super().__init__('robot_status_gpio_controller')
-        
+
         # Initialize pins (Ensure proper hardware permissions or mock factory are set)
         self.pin_data_status = LED(23)
         self.pin_nav_status = LED(24)
+        self.pin_light = LED(25)
 
         self.data_timeout_sec = 2.0
-        
-        # FIXED: Initialize to the Node's native ROS clock type to prevent 
+
+        # FIXED: Initialize to the Node's native ROS clock type to prevent
         # "Cannot add/subtract time types" runtime exceptions.
         now = self.get_clock().now()
         self.last_telemetry_time = now
@@ -29,6 +30,8 @@ class RobotStatusGpioController(Node):
         self.create_subscription(Imu, '/imu', self.imu_callback, 10)
         self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.create_subscription(GoalStatusArray, '/navigate_to_pose/_action/status', self.nav_status_callback, 10)
+        # Simple manual toggle: publish True/False on /light to turn the light LED on/off.
+        self.create_subscription(Bool, '/light', self.light_callback, 10)
 
         # Health monitoring timer
         self.create_timer(0.1, self.check_data_freshness)
@@ -42,16 +45,22 @@ class RobotStatusGpioController(Node):
     def scan_callback(self, msg):
         self.last_scan_time = self.get_clock().now()
 
+    def light_callback(self, msg):
+        if msg.data:
+            self.pin_light.on()
+        else:
+            self.pin_light.off()
+
     def check_data_freshness(self):
         now = self.get_clock().now()
-        
+
         # Math is now valid because both 'now' and 'last_*_time' share ClockType.ROS_TIME
         dt_telemetry = (now - self.last_telemetry_time).nanoseconds / 1e9
         dt_imu = (now - self.last_imu_time).nanoseconds / 1e9
         dt_scan = (now - self.last_scan_time).nanoseconds / 1e9
 
-        if (dt_telemetry < self.data_timeout_sec and 
-            dt_imu < self.data_timeout_sec and 
+        if (dt_telemetry < self.data_timeout_sec and
+            dt_imu < self.data_timeout_sec and
             dt_scan < self.data_timeout_sec):
             if not self.pin_data_status.is_active:
                 self.pin_data_status.on()
@@ -85,11 +94,13 @@ def main(args=None):
         try:
             node.pin_data_status.off()
             node.pin_nav_status.off()
+            node.pin_light.off()
             node.pin_data_status.close()
             node.pin_nav_status.close()
+            node.pin_light.close()
         except Exception:
             pass
-            
+
         node.destroy_node()
         rclpy.shutdown()
 
