@@ -50,7 +50,7 @@ class InverseKinematics(Node):
             [-1/wheel_radius,  wheel_base/(2*wheel_radius)]   # Left Side
         ])
         
-        resultant_angular_velocities = (transformation_matrix @ np.array([[-1*linear_cmd], [angular_cmd]]))
+        resultant_angular_velocities = (transformation_matrix @ np.array([[linear_cmd], [angular_cmd]]))
         
         omega_r = float(resultant_angular_velocities[0][0])
         omega_l = float(resultant_angular_velocities[1][0])
