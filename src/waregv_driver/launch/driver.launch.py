@@ -12,7 +12,7 @@ def generate_launch_description():
         package="waregv_driver",
         executable="ydlidar",
    
-         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
+         parameters=[{"angle_offset_deg:":-25.0,'use_sim_time': LaunchConfiguration("use_sim_time")}],
         output="screen",
     )
     
@@ -49,7 +49,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-                            #   ydlidar_node,
+                              ydlidar_node,
                               controller_link,
                               motor_encoder,
                               imu,
