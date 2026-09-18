@@ -5,6 +5,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
 import json
+import math
 
 class ImuNode(Node):
     def __init__(self):
@@ -29,17 +30,36 @@ class ImuNode(Node):
                 imu_msg.header.stamp = now
                 imu_msg.header.frame_id = "imu_link"
 
+                # ANGULAR VELOCITY (Converted from degrees/s to rad/s)
                 imu_msg.angular_velocity.x = 0.0
                 imu_msg.angular_velocity.y = 0.0
-                imu_msg.angular_velocity.z = float(data['gz'])
+                imu_msg.angular_velocity.z = math.radians(float(data['gz']))
 
-                imu_msg.orientation_covariance[0] = -1.0 
-                imu_msg.linear_acceleration_covariance[0] = -1.0 
+                # LINEAR ACCELERATION (ROS standard is m/s^2)
+                # Fetches ax, ay, az if your Arduino sends them; otherwise defaults to 0.0
+                imu_msg.linear_acceleration.x = float(data.get('ax', 0.0))
+                imu_msg.linear_acceleration.y = float(data.get('ay', 0.0))
+                imu_msg.linear_acceleration.z = float(data.get('az', 0.0))
+
+                # COVARIANCES
+                imu_msg.orientation_covariance[0] = -1.0 # -1 means no orientation data provided
+                
+                # Update linear acceleration covariance if acceleration data is present
+                if 'ax' in data:
+                    imu_msg.linear_acceleration_covariance = [
+                        1e-3, 0.0, 0.0,
+                        0.0, 1e-3, 0.0,
+                        0.0, 0.0, 1e-3
+                    ]
+                else:
+                    imu_msg.linear_acceleration_covariance[0] = -1.0 
+
                 imu_msg.angular_velocity_covariance = [
                     1e6, 0.0, 0.0,
                     0.0, 1e6, 0.0,
                     0.0, 0.0, 1e-3
                 ]
+                
                 self.imu_pub.publish(imu_msg)
                 
         except json.JSONDecodeError:
