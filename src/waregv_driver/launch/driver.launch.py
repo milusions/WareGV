@@ -12,7 +12,7 @@ def generate_launch_description():
         package="waregv_driver",
         executable="ydlidar",
    
-         parameters=[{"reverse_direction":True,"angle_offset_deg":-25.0,'use_sim_time': LaunchConfiguration("use_sim_time")}],
+         parameters=[{"reverse_direction":True,"angle_offset_deg":25.0,'use_sim_time': LaunchConfiguration("use_sim_time")}],
         output="screen",
     )
     
