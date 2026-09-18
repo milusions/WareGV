@@ -104,8 +104,8 @@ class ControllerLink(Node):
         # Array Order: [RF, RR, LF, LR]
         # Since it's skid-steer, Front and Rear are identical on each side.
         # We parse Index 0 for Right, and Index 2 for Left.
-        rw = float(raw_vals[1])
-        lw = float(raw_vals[0])
+        rw = float(raw_vals[0])
+        lw = float(raw_vals[1])
 
         # Build clean JSON packet
         json_str = f'{{"rw":{rw:.3f},"lw":{lw:.3f}}}\n'
