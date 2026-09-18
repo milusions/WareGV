@@ -46,7 +46,7 @@ class JoystickController(Node):
         else:
             self.send_stop = False
         
-        max_lin = self.get_parameter('max_linear_vel').value
+        max_lin = -1*self.get_parameter('max_linear_vel').value
         max_ang = self.get_parameter('max_angular_vel').value
 
     
