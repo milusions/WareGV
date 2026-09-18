@@ -46,7 +46,8 @@ setup(
             
             "imu=waregv_driver.imu:main",
             "motor_encoder=waregv_driver.motor_encoder:main",
-            "controller_link=waregv_driver.controller_link:main"
+            "controller_link=waregv_driver.controller_link:main",
+            "camera=waregv_driver.camera:main"
             
         ],
     },

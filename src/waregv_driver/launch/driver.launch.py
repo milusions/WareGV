@@ -39,11 +39,20 @@ def generate_launch_description():
          parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
         output="screen",
     )
+    
+    camera = Node(
+        package="waregv_driver",
+        executable="camera",
+   
+         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
+        output="screen",
+    )
 
     return LaunchDescription([
                               ydlidar_node,
                               controller_link,
                               motor_encoder,
                               imu,
+                              camera
                               
                              ])
