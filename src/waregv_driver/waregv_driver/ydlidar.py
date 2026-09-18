@@ -28,6 +28,11 @@ class YDLidarNode(Node):
         # e.g. shifting the effective origin 3cm backward -> x_offset_m = -0.03
         self.declare_parameter('x_offset_m', 0.0)
         self.declare_parameter('y_offset_m', 0.0)
+        # Set True if left/right appears mirrored in RViz/Foxglove
+        # (e.g. lidar mounted upside-down, or its scan direction is
+        # clockwise while ROS expects counter-clockwise). This flips
+        # the scan across the robot's forward (x) axis.
+        self.declare_parameter('reverse_direction', False)
 
         port = self.get_parameter('port').value
         baudrate = self.get_parameter('baudrate').value
@@ -35,6 +40,7 @@ class YDLidarNode(Node):
         self.angle_offset_deg = self.get_parameter('angle_offset_deg').value
         self.x_offset_m = self.get_parameter('x_offset_m').value
         self.y_offset_m = self.get_parameter('y_offset_m').value
+        self.reverse_direction = self.get_parameter('reverse_direction').value
 
         self.get_logger().info(f"Connecting directly to YDLidar on {port}")
 
@@ -82,7 +88,7 @@ class YDLidarNode(Node):
             n = len(raw_ranges)
 
             if n > 0 and (self.angle_offset_deg != 0.0 or self.x_offset_m != 0.0
-                          or self.y_offset_m != 0.0):
+                          or self.y_offset_m != 0.0 or self.reverse_direction):
                 angle_min = msg.angle_min
                 angle_inc = msg.angle_increment
                 offset_rad = self.angle_offset_deg * math.pi / 180.0
@@ -100,6 +106,12 @@ class YDLidarNode(Node):
                     # Point in the lidar's original local frame.
                     x = r * math.cos(theta)
                     y = r * math.sin(theta)
+
+                    # Mirror left/right by flipping across the forward
+                    # (x) axis. Must happen before translation/rotation
+                    # since it changes handedness, not just angle.
+                    if self.reverse_direction:
+                        y = -y
 
                     # Shift the effective sensor origin (translation
                     # correction), then rotate about the new origin to
