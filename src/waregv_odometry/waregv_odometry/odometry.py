@@ -17,7 +17,7 @@ class FusedOdometryNode(Node):
         self.joint_state_sub = self.create_subscription(
             JointState, '/joint_states', self.joint_state_callback, 10)
         self.imu_sub = self.create_subscription(
-            Imu, '/imu_1', self.imu_callback, 10)
+            Imu, '/imu', self.imu_callback, 10)
         
         # Publisher and TF Broadcaster
         self.odom_pub = self.create_publisher(PoseStamped, '/odom', 10)

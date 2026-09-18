@@ -87,8 +87,8 @@ def generate_launch_description():
         map_name_arg,
                           mapping_check_arg,
                           navigation_check_arg,
-                            #   nav_node,
-                            #   commander_node,
+                              nav_node,
+                              commander_node,
                               commander_rest_server_node,
                               
                              ])

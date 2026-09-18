@@ -24,6 +24,7 @@ class InverseKinematics(Node):
         )
         self.declare_parameter('wheel_radius', 0.0325)
         self.declare_parameter('wheel_base', 0.176)
+
         
         self.get_logger().info('IK Node Started. Output: [RF, RR, LF, LR] (Forward = Negative)')
 
@@ -49,14 +50,15 @@ class InverseKinematics(Node):
             [-1/wheel_radius,  wheel_base/(2*wheel_radius)]   # Left Side
         ])
         
-        resultant_angular_velocities = (transformation_matrix @ np.array([[linear_cmd], [angular_cmd]]))
+        resultant_angular_velocities = (transformation_matrix @ np.array([[-1*linear_cmd], [angular_cmd]]))
         
         omega_r = float(resultant_angular_velocities[0][0])
         omega_l = float(resultant_angular_velocities[1][0])
         
         # Output strictly in requested order: 
         # 1. right_front, 2. right_rear, 3. left_front, 4. left_rear
-        return [omega_r, omega_r, omega_l, omega_l]
+        
+        return [omega_l, omega_r, omega_l, omega_r]
     
 def main(args=None):
     rclpy.init(args=args)

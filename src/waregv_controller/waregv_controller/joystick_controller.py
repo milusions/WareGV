@@ -37,21 +37,21 @@ class JoystickController(Node):
             return
         enable_button_pressed = msg.buttons[4] == 1 
 
-        if not enable_button_pressed:
-            if self.send_stop == False:
-                cmd_msg = Twist()
-                self.cmd_pub_.publish(cmd_msg)
-                self.send_stop = True
-            return
-        else:
-            self.send_stop = False
+        # if not enable_button_pressed:
+        #     if self.send_stop == False:
+        #         cmd_msg = Twist()
+        #         self.cmd_pub_.publish(cmd_msg)
+        #         self.send_stop = True
+        #     return
+        # else:
+        #     self.send_stop = False
         
         max_lin = self.get_parameter('max_linear_vel').value
         max_ang = self.get_parameter('max_angular_vel').value
 
     
         linear_cmd = msg.axes[1] * max_lin
-        angular_cmd = msg.axes[0] * max_ang
+        angular_cmd = msg.axes[3] * max_ang
  
         cmd_msg = Twist()
         cmd_msg.linear.x = linear_cmd

@@ -15,7 +15,8 @@ velocity_controller:
     use_sim_time: true
    
     joints:
-      - wheel_front_right_joint
       - wheel_front_left_joint
-      - wheel_rear_right_joint
+      - wheel_front_right_joint
       - wheel_rear_left_joint
+      - wheel_rear_right_joint
+      

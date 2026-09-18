@@ -10,6 +10,7 @@ import numpy as np
 from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
 from launch_ros.substitutions.find_package import FindPackageShare
 from launch_xml.launch_description_sources.xml_launch_description_source import XMLLaunchDescriptionSource
+import json
 
 
 def generate_launch_description(): 
@@ -47,8 +48,20 @@ def generate_launch_description():
         }.items()
     )
     
+    qos_overrides = {
+    "/initialpose": {
+        "durability": "volatile"
+    },
+    "/map": {
+        "durability": "transient_local",
+        "reliability": "reliable",
+        "history": "keep_last",
+        "depth": 1
+    }
+
+   }
+
     foxglove_bridge = IncludeLaunchDescription(
-        # USE XMLLaunchDescriptionSource HERE:
         XMLLaunchDescriptionSource(
             PathJoinSubstitution([
                 FindPackageShare('foxglove_bridge'),
@@ -57,7 +70,9 @@ def generate_launch_description():
             ])
         ),
         launch_arguments={
-            'port': '8765'
+            'port': '8765',
+            # Convert the dictionary into a JSON string that the XML launch file can parse
+            'topic_qos_overrides': json.dumps(qos_overrides)
         }.items()
     )
     

@@ -8,6 +8,9 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.substitutions import PathJoinSubstitution
 import numpy as np
 from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
+from launch_xml.launch_description_sources.xml_launch_description_source import XMLLaunchDescriptionSource
+from launch_ros.substitutions.find_package import FindPackageShare
+import json
 
 
 def generate_launch_description():
@@ -60,6 +63,35 @@ def generate_launch_description():
         arguments=["-world", world_name_conf, "-topic", "robot_description", "-name", "waregv", "-z", robot_spawn_z]
         
     )
+    
+    qos_overrides = {
+    "/initialpose": {
+        "durability": "volatile"
+    },
+    "/map": {
+        "durability": "transient_local",
+        "reliability": "reliable",
+        "history": "keep_last",
+        "depth": 1
+    }
+
+   }
+
+    foxglove_bridge = IncludeLaunchDescription(
+        XMLLaunchDescriptionSource(
+            PathJoinSubstitution([
+                FindPackageShare('foxglove_bridge'),
+                'launch',
+                'foxglove_bridge_launch.xml'
+            ])
+        ),
+        launch_arguments={
+            'port': '8765',
+            # Convert the dictionary into a JSON string that the XML launch file can parse
+            'topic_qos_overrides': json.dumps(qos_overrides)
+        }.items()
+    )
+    
     
     
     
@@ -170,6 +202,7 @@ def generate_launch_description():
         wheel_radius_arg,
         wheel_base_arg,
         model_arg,
+        foxglove_bridge,
         rosbridge_node,
         waregv_urdf,
         gazebo_sim,

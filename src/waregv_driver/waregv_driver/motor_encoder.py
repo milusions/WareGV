@@ -7,7 +7,9 @@ from std_msgs.msg import String
 import json
 import math
 
+
 class JointStateNode(Node):
+
     def __init__(self):
         super().__init__('joint_state_node')
         
@@ -16,9 +18,9 @@ class JointStateNode(Node):
 
         self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
         self.telemetry_sub = self.create_subscription(
-            String, 
-            '/controller/telemetry', 
-            self.telemetry_callback, 
+            String,
+            '/controller/telemetry',
+            self.telemetry_callback,
             10
         )
         self.get_logger().info("Joint State Node initialized, waiting for telemetry...")
@@ -36,32 +38,37 @@ class JointStateNode(Node):
                 
                 # Order matched to the velocity command input
                 js_msg.name = [
-                    'right_front_joint', 
-                    'right_rear_joint', 
-                    'left_front_joint', 
-                    'left_rear_joint'
+                        'left_front_joint',
+                    'right_front_joint',
+                 
+                                      'left_rear_joint',
+                    'right_rear_joint'
+   
                 ]
                 
                 rad_per_tick = (2.0 * math.pi) / self.ticks_per_rev
                 
                 js_msg.position = [
-                    data['rfp'] * rad_per_tick,
-                    data['rrp'] * rad_per_tick,
                     data['lfp'] * rad_per_tick,
-                    data['lrp'] * rad_per_tick
+                    data['rfp'] * rad_per_tick,
+                       data['lrp'] * rad_per_tick,
+                    data['rrp'] * rad_per_tick,
+                 
                 ]
                 
                 js_msg.velocity = [
+                                 float(data['lfv']),
                     float(data['rfv']),
-                    float(data['rrv']),
-                    float(data['lfv']),
-                    float(data['lrv'])
+       
+                    float(data['lrv']),
+                      float(data['rrv']),
                 ]
                 
                 self.joint_pub.publish(js_msg)
           
         except json.JSONDecodeError:
             self.get_logger().warn("Malformed JSON received")
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -74,6 +81,7 @@ def main(args=None):
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
