@@ -5,6 +5,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 import ydlidar
 import time
+import math
 
 class YDLidarNode(Node):
     def __init__(self):
@@ -20,11 +21,20 @@ class YDLidarNode(Node):
         # of the lidar, along the robot's forward axis) appears centered
         # and perpendicular in the visualized scan.
         self.declare_parameter('angle_offset_deg', 0.0)
+        # Translation correction (meters), applied in the lidar's own
+        # local frame (x = forward, y = left), BEFORE the angle_offset
+        # rotation is applied. Use this if the physical scan center needs
+        # to be shifted without moving lidar_link in the URDF/TF.
+        # e.g. shifting the effective origin 3cm backward -> x_offset_m = -0.03
+        self.declare_parameter('x_offset_m', 0.0)
+        self.declare_parameter('y_offset_m', 0.0)
 
         port = self.get_parameter('port').value
         baudrate = self.get_parameter('baudrate').value
         self.frame_id = self.get_parameter('frame_id').value
         self.angle_offset_deg = self.get_parameter('angle_offset_deg').value
+        self.x_offset_m = self.get_parameter('x_offset_m').value
+        self.y_offset_m = self.get_parameter('y_offset_m').value
 
         self.get_logger().info(f"Connecting directly to YDLidar on {port}")
 
@@ -68,18 +78,53 @@ class YDLidarNode(Node):
             msg.range_min = scan_data.config.min_range
             msg.range_max = scan_data.config.max_range
 
-            ranges = [float(point.range) for point in scan_data.points]
+            raw_ranges = [float(point.range) for point in scan_data.points]
+            n = len(raw_ranges)
 
-            if self.angle_offset_deg != 0.0 and len(ranges) > 0:
-                # Convert the angular offset into an index shift and
-                # rotate the ranges array so the physical misalignment
-                # is corrected. This assumes points are evenly spaced
-                # by angle_increment across the full scan.
-                n = len(ranges)
-                shift = int(round((self.angle_offset_deg * 3.14159265358979 / 180.0)
-                                   / msg.angle_increment))
-                shift = shift % n
-                ranges = ranges[-shift:] + ranges[:-shift]
+            if n > 0 and (self.angle_offset_deg != 0.0 or self.x_offset_m != 0.0
+                          or self.y_offset_m != 0.0):
+                angle_min = msg.angle_min
+                angle_inc = msg.angle_increment
+                offset_rad = self.angle_offset_deg * math.pi / 180.0
+                range_max = msg.range_max if msg.range_max > 0.0 else float('inf')
+
+                # Start every output bin empty (no return in that direction).
+                new_ranges = [float('inf')] * n
+
+                for i, r in enumerate(raw_ranges):
+                    if not math.isfinite(r) or r <= 0.0:
+                        continue
+
+                    theta = angle_min + i * angle_inc
+
+                    # Point in the lidar's original local frame.
+                    x = r * math.cos(theta)
+                    y = r * math.sin(theta)
+
+                    # Shift the effective sensor origin (translation
+                    # correction), then rotate about the new origin to
+                    # correct the mounting yaw error.
+                    x -= self.x_offset_m
+                    y -= self.y_offset_m
+                    x_rot = x * math.cos(offset_rad) - y * math.sin(offset_rad)
+                    y_rot = x * math.sin(offset_rad) + y * math.cos(offset_rad)
+
+                    new_r = math.hypot(x_rot, y_rot)
+                    new_theta = math.atan2(y_rot, x_rot)
+
+                    # Re-bin onto the fixed angle grid the message uses.
+                    idx = int(round((new_theta - angle_min) / angle_inc))
+                    idx = idx % n
+
+                    # Keep the closest point if two source points land in
+                    # the same output bin.
+                    if new_r < new_ranges[idx]:
+                        new_ranges[idx] = new_r
+
+                # Cap anything beyond range_max back to "no return".
+                ranges = [r if r <= range_max else float('inf') for r in new_ranges]
+            else:
+                ranges = raw_ranges
 
             msg.ranges = ranges
             msg.intensities = []  # X2 is single-channel: no intensity data
