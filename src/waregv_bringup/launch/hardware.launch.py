@@ -1,152 +1,166 @@
-from launch import LaunchDescription
-from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 import os
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from ament_index_python.packages import get_package_share_directory
-from launch.substitutions import LaunchConfiguration
-from launch.substitutions import PathJoinSubstitution
-import numpy as np
-from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
-from launch_ros.substitutions.find_package import FindPackageShare
-from launch_xml.launch_description_sources.xml_launch_description_source import XMLLaunchDescriptionSource
 import json
-from launch.actions.group_action import GroupAction
+import numpy as np
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.launch_description_sources.frontend_launch_description_source import FrontendLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
 
 
-def generate_launch_description(): 
-    
+def generate_launch_description():
     waregv_bringup_dir = get_package_share_directory("waregv_bringup")
-    
-    mapping_enable_arg = DeclareLaunchArgument(name="mapping_enable", default_value='true')
-    navigation_enable_arg = DeclareLaunchArgument(name="navigation_enable", default_value='true')
-    max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value='0.5')
+
+    # Launch Arguments
+    mapping_enable_arg = DeclareLaunchArgument(name="mapping_enable", default_value="true")
+    navigation_enable_arg = DeclareLaunchArgument(name="navigation_enable", default_value="true")
+    max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.5")
     max_angular_velocity_arg = DeclareLaunchArgument(name="max_angular_velocity", default_value=str(np.pi))
-    wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.0325')
-    wheel_base_arg = DeclareLaunchArgument(name="wheel_base", default_value='0.176')
-    map_name_arg = DeclareLaunchArgument(name="map_name", default_value='small_warehouse')
- 
-    map_name_conf = LaunchConfiguration("map_name")
+    wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value="0.0325")
+    wheel_base_arg = DeclareLaunchArgument(name="wheel_base", default_value="0.176")
+    map_name_arg = DeclareLaunchArgument(name="map_name", default_value="small_warehouse")
+
+    # Configurations
     mapping_enable_conf = LaunchConfiguration("mapping_enable")
     navigation_enable_conf = LaunchConfiguration("navigation_enable")
     max_linear_velocity_conf = LaunchConfiguration("max_linear_velocity")
     max_angular_velocity_conf = LaunchConfiguration("max_angular_velocity")
     wheel_radius_conf = LaunchConfiguration("wheel_radius")
     wheel_base_conf = LaunchConfiguration("wheel_base")
+    map_name_conf = LaunchConfiguration("map_name")
 
-    use_sim_time = 'false' 
-    
-    rosbridge_dir = get_package_share_directory('rosbridge_server')
-    
-    # Bridges
-    rosbridge_dir = get_package_share_directory('rosbridge_server')
-    
+    use_sim_time = "false"
+
+    # ROSBridge Websocket
+    rosbridge_dir = get_package_share_directory("rosbridge_server")
     rosbridge_node = IncludeLaunchDescription(
-    FrontendLaunchDescriptionSource(
-        os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
-    ),
-    launch_arguments={'port': '9090', 'ssl': 'false','output': 'log'}.items(),
-)
-    
+        FrontendLaunchDescriptionSource(
+            os.path.join(rosbridge_dir, "launch", "rosbridge_websocket_launch.xml")
+        ),
+        launch_arguments={"port": "9090", "ssl": "false", "output": "log"}.items(),
+    )
+
+    # Foxglove Bridge
     qos_overrides = {
         "/initialpose": {"durability": "volatile"},
-        "/map": {"durability": "transient_local", "reliability": "reliable", "history": "keep_last", "depth": 1}
+        "/map": {
+            "durability": "transient_local",
+            "reliability": "reliable",
+            "history": "keep_last",
+            "depth": 1,
+        },
     }
-
 
     foxglove_bridge = GroupAction(
         actions=[
             IncludeLaunchDescription(
                 XMLLaunchDescriptionSource(
                     PathJoinSubstitution([
-                        FindPackageShare('foxglove_bridge'),
-                        'launch',
-                        'foxglove_bridge_launch.xml'
+                        FindPackageShare("foxglove_bridge"),
+                        "launch",
+                        "foxglove_bridge_launch.xml",
                     ])
                 ),
                 launch_arguments={
-                    'port': '8765',
-                    'topic_qos_overrides': json.dumps(qos_overrides)
-                }.items()
+                    "port": "8765",
+                    "topic_qos_overrides": json.dumps(qos_overrides),
+                }.items(),
             )
         ],
         scoped=True,
         forwarding=True,
-       
     )
-    
-    twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, 'config', 'twist_mux.yaml')
 
+    # Twist Mux Node
+    twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, "config", "twist_mux.yaml")
     twist_mux_node = Node(
-        package='twist_mux',
-        executable='twist_mux',
-        name='twist_mux',
+        package="twist_mux",
+        executable="twist_mux",
+        name="twist_mux",
         parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
-        remappings=[('/cmd_vel_out', '/cmd_vel_unstamped')]
+        remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
     )
-    
+
+    # Heartbeat Node
     heartbeat_light = Node(
-        package='waregv_heartbeat',
-        executable='heartbeat_light',
-        name='heartbeat_light',
-            parameters=[{'use_sim_time': False}],
-       
+        package="waregv_heartbeat",
+        executable="heartbeat_light",
+        name="heartbeat_light",
+        parameters=[{"use_sim_time": False}],
     )
-    
- 
-    waregv_controller_launch_file_path = os.path.join(get_package_share_directory("waregv_controller"), 'launch', 'controller.launch.py')
+
+    # Robot Controller
+    waregv_controller_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_controller"), "launch", "controller.launch.py"
+    )
     waregv_controller = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_controller_launch_file_path),
         launch_arguments={
             "use_sim_time": use_sim_time,
-            "max_angular_velocity": max_angular_velocity_conf, 
+            "max_angular_velocity": max_angular_velocity_conf,
             "max_linear_velocity": max_linear_velocity_conf,
-              "wheel_radius": wheel_radius_conf,
-                "wheel_base": wheel_base_conf
-        }.items() 
+            "wheel_radius": wheel_radius_conf,
+            "wheel_base": wheel_base_conf,
+        }.items(),
     )
-    
-    
-    waregv_description_launch_file_path = os.path.join(get_package_share_directory("waregv_description"), 'launch', 'urdf.launch.py')
-    
+
+    # Robot URDF Description
+    waregv_description_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_description"), "launch", "urdf.launch.py"
+    )
     waregv_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_description_launch_file_path),
-        launch_arguments={"use_sim_time":use_sim_time}.items() 
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
-    
-    waregv_driver_launch_file_path = os.path.join(get_package_share_directory("waregv_driver"), 'launch', 'driver.launch.py')
-    
+
+    # Hardware Driver
+    waregv_driver_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_driver"), "launch", "driver.launch.py"
+    )
     waregv_driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_driver_launch_file_path),
-        launch_arguments={"use_sim_time":use_sim_time}.items() 
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
-    
-    waregv_web_dashboard_launch_file_path = os.path.join(get_package_share_directory("waregv_navigation"), 'launch', 'dashboard.launch.py')
+
+    # Web Dashboard / Navigation
+    waregv_web_dashboard_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_navigation"), "launch", "dashboard.launch.py"
+    )
     waregv_web_dashboard = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_web_dashboard_launch_file_path),
         launch_arguments={
             "use_sim_time": use_sim_time,
-  
-        }.items() 
+            "mapping_enable": mapping_enable_conf,
+            "navigation_enable": navigation_enable_conf,
+            "map_name": map_name_conf,
+        }.items(),
     )
-    
-    waregv_odometry_launch_file_path = os.path.join(get_package_share_directory("waregv_odometry"), 'launch', 'odometry.launch.py')
+
+    # Odometry
+    waregv_odometry_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_odometry"), "launch", "odometry.launch.py"
+    )
     waregv_odometry = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
         launch_arguments={
-            "use_sim_time": use_sim_time, 
-            "wheel_radius": wheel_radius_conf
-        }.items() 
+            "use_sim_time": use_sim_time,
+            "wheel_radius": wheel_radius_conf,
+        }.items(),
     )
 
     return LaunchDescription([
         mapping_enable_arg,
         navigation_enable_arg,
         max_linear_velocity_arg,
-        map_name_arg,
         max_angular_velocity_arg,
         wheel_radius_arg,
         wheel_base_arg,
+        map_name_arg,
         heartbeat_light,
         foxglove_bridge,
         waregv_description,
@@ -155,6 +169,5 @@ def generate_launch_description():
         twist_mux_node,
         waregv_odometry,
         waregv_controller,
-    waregv_web_dashboard,
+        waregv_web_dashboard,
     ])
-
