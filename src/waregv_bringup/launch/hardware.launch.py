@@ -11,6 +11,7 @@ from launch.launch_description_sources.frontend_launch_description_source import
 from launch_ros.substitutions.find_package import FindPackageShare
 from launch_xml.launch_description_sources.xml_launch_description_source import XMLLaunchDescriptionSource
 import json
+from launch.actions.group_action import GroupAction
 
 
 def generate_launch_description(): 
