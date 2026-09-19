@@ -151,7 +151,7 @@ function isValidRoverHost(h) {
     return /^(\d{1,3}(\.\d{1,3}){3}|[a-z0-9]([a-z0-9.-]*[a-z0-9])?)$/i.test(h);
 }
 function getRoverIp() {
-    try { return normalizeRoverIp(localStorage.getItem(ROVER_IP_KEY)); } catch (e) { return ''; }
+    try { return normalizeRoverIp(localStorage.getItem(ROVER_IP_KEY)); } catch (e) { return '0.0.0.0'; }
 }
 function saveRoverIpAndReload(v) {
     const ip = normalizeRoverIp(v);
@@ -943,7 +943,7 @@ function yawDegToQuaternion(yawDeg) {
     return { yaw_z: Math.sin(r / 2), yaw_w: Math.cos(r / 2) };
 }
 async function postJSON(url, body) {
-    const r = await fetch("http://"+ROVER_IP+url, {
+    const r = await fetch("http://"+ROVER_HOST+url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body)
     });
