@@ -151,7 +151,7 @@ function isValidRoverHost(h) {
     return /^(\d{1,3}(\.\d{1,3}){3}|[a-z0-9]([a-z0-9.-]*[a-z0-9])?)$/i.test(h);
 }
 function getRoverIp() {
-    try { return normalizeRoverIp(localStorage.getItem(ROVER_IP_KEY)); } catch (e) { return '0.0.0.0'; }
+    try { return normalizeRoverIp(localStorage.getItem(ROVER_IP_KEY)); } catch (e) { return ''; }
 }
 function saveRoverIpAndReload(v) {
     const ip = normalizeRoverIp(v);
