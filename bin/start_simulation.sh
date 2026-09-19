@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# --- Color Definitions ---
+PRIMARY="\e[38;2;0;119;255m"
+BOLD_WHITE="\e[1;97m"
+DIM_GRAY="\e[38;2;120;120;120m"
+ACCENT_GREEN="\e[38;2;0;200;100m"
+RESET="\e[0m"
+
+LOG_DIR="$HOME/waregv/waregv_ws/logs"
+LOG_FILE="$LOG_DIR/simulation.log"
+mkdir -p "$LOG_DIR"
+
+# Clean signal handling to kill background tasks on exit
+trap 'kill $(jobs -p) 2>/dev/null' EXIT INT TERM
+
 echo "Waiting for network interfaces to come up..."
 while ! ip link show up | grep -q "lo"; do
     sleep 1
@@ -8,9 +22,8 @@ done
 echo "Allowing system resources 5 seconds to settle..."
 sleep 5
 
-
-MAPPING_ENABLE="true"
-NAVIGATION_ENABLE="true"
+MAPPING_ENABLE="false"
+NAVIGATION_ENABLE="false"
 WORLD_NAME="small_warehouse"
 MAX_LINEAR_VELOCITY="0.5"
 MAX_ANGULAR_VELOCITY="3.14159265359"
@@ -69,11 +82,27 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-colcon build
+MODE="Teleop / Idle"
+if [[ "$MAPPING_ENABLE" == "true" ]]; then
+    MODE="Mapping (SLAM)"
+elif [[ "$NAVIGATION_ENABLE" == "true" ]]; then
+    MODE="Autonomous Navigation"
+fi
+
+# Clear old log file content before running
+> "$LOG_FILE"
+
+cd ~/waregv/waregv_ws
+
+echo -e "  ${PRIMARY}[BUILDING]${RESET}   ${BOLD_WHITE}Compiling ROS 2 workspace (colcon build)...${RESET}"
+colcon build > /dev/null 2>&1
+
+echo -e "  ${PRIMARY}[SOURCING]${RESET}   ${DIM_GRAY}Loading ROS 2 Jazzy environment setup...${RESET}"
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
-ros2 launch waregv_bringup simulation.launch.py \
+# Execute launch in background
+stdbuf -oL -eL ros2 launch waregv_bringup simulation.launch.py \
     mapping_enable:="$MAPPING_ENABLE" \
     navigation_enable:="$NAVIGATION_ENABLE" \
     world_name:="$WORLD_NAME" \
@@ -83,4 +112,23 @@ ros2 launch waregv_bringup simulation.launch.py \
     wheel_base:="$WHEEL_BASE" \
     model:="$MODEL" \
     spawn_z:="$SPAWN_Z" \
-    map_name:="$MAP_NAME"
+    map_name:="$MAP_NAME" > "$LOG_FILE" 2>&1 &
+
+LAUNCH_PID=$!
+
+# Live stationary 5-line status card
+while kill -0 $LAUNCH_PID 2>/dev/null; do
+    clear
+    echo -e "${PRIMARY}====================================================${RESET}"
+    echo -e "${PRIMARY}  M I L U S I O N S   W A R E G V${RESET} ${DIM_GRAY}(Simulation)${RESET}"
+    echo -e "${PRIMARY}====================================================${RESET}"
+    echo -e "  ${BOLD_WHITE}System Mode:${RESET}  ${PRIMARY}${MODE}${RESET}"
+    echo -e "  ${BOLD_WHITE}World Name:${RESET}   ${DIM_GRAY}${WORLD_NAME}${RESET}"
+    echo -e "  ${BOLD_WHITE}Robot Model:${RESET}  ${DIM_GRAY}${MODEL}${RESET}"
+    echo -e "  ${BOLD_WHITE}Log File:${RESET}     ${DIM_GRAY}${LOG_FILE}${RESET}"
+    echo -e "${PRIMARY}----------------------------------------------------${RESET}"
+    echo -e "  ${ACCENT_GREEN}[RUNNING]${RESET}    ${BOLD_WHITE}Live Output (Last 5 Lines):${RESET}\n"
+    
+    tail -n 5 "$LOG_FILE"
+    sleep 0.5
+done

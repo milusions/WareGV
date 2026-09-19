@@ -2,7 +2,6 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions.declare_launch_argument import DeclareLaunchArgument
 import numpy as np
-from launch.substitutions.python_expression import PythonExpression
 from launch.substitutions.launch_configuration import LaunchConfiguration
 
 

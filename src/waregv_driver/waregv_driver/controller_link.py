@@ -18,7 +18,7 @@ class ControllerLink(Node):
         super().__init__('controller_link')
 
         # --- Configure Local File Logger ---
-        self.log_file = os.path.expanduser('~/waregv_ws/arduino_link.log')
+        self.log_file = os.path.expanduser('~/waregv/waregv_ws/arduino_link.log')
         os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
         self.log_msg("INFO", "=== Arduino Controller Link Started ===")
 

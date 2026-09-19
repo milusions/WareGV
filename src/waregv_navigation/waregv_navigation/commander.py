@@ -1,118 +1,406 @@
 #!/usr/bin/env python3
 
-import sys
+import subprocess
+import json
+import threading
+import time
+
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseArray, PoseWithCovarianceStamped
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from rclpy.duration import Duration
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg._empty import Empty
-from std_msgs.msg._string import String
-from rclpy.executors import SingleThreadedExecutor
-from geometry_msgs.msg._pose_array import PoseArray
+from std_msgs.msg import Empty, String
+
 
 class CommanderNode(Node):
-    def __init__(self,node_name):
+    """
+    Bridge between the REST/web interface and Nav2 Simple Commander.
+
+    Important:
+      * BasicNavigator is itself a ROS node and MUST be added to the executor.
+      * Navigation work is done in worker threads so ROS callbacks do not block.
+      * AMCL is not hard-coded. Nav2 may be using AMCL, slam_toolbox, or another
+        localization node depending on the launched system.
+    """
+
+    def __init__(self, node_name="commander_node"):
         super().__init__(node_name)
+
         self.navigator = BasicNavigator()
-        
-        self.create_subscription(PoseStamped, '/nav_to_pose', self.handle_nav_to_pose, 10)
-        self.create_subscription(PoseArray, '/follow_waypoints', self.handle_follow_waypoints, 10)
-        self.create_subscription(PoseStamped, '/set_initial_pose', self.set_initial_pose, 10)
-        self.create_subscription(Empty, '/abort_mission', self.handle_abort, 10)
-        self.status_pub = self.create_publisher(String, '/nav_mission_status', 10)
 
-        self.get_logger().info('Nav2 Manager Node is running and listening for commands...')
-        
-            
+        self.create_subscription(
+            PoseStamped, "/nav_to_pose", self.handle_nav_to_pose, 10
+        )
+        self.create_subscription(
+            PoseArray, "/follow_waypoints", self.handle_follow_waypoints, 10
+        )
+        self.create_subscription(
+            PoseWithCovarianceStamped, "/set_initial_pose", self.set_initial_pose, 10
+        )
+        self.create_subscription(
+            Empty, "/abort_mission", self.handle_abort, 10
+        )
+        self.create_subscription(
+            String, "/save_map", self.handle_save_map, 10
+        )
 
-    def set_initial_pose(self, msg: PoseStamped):
-        """Sets the initial pose for AMCL localization and waits for Nav2 active state."""
-        self.navigator.setInitialPose(msg)
+        self.status_pub = self.create_publisher(String, "/nav_mission_status", 10)
+        self.feedback_pub = self.create_publisher(String, "/nav_mission_feedback", 10)
 
+        self.goal_lock = threading.Lock()
+        self.goal_running = False
+        self.shutdown_requested = False
 
-    def monitor_task(self, max_duration_sec: float = 120.0) -> TaskResult:
-        """Monitors active tasks, prints progress, and handles timeout/cancellation."""
-        
-        cycle = 0
-        while not self.navigator.isTaskComplete():
-            cycle += 1
-            feedback = self.navigator.getFeedback()
+        self.get_logger().info(
+            "Nav2 Commander is running: /nav_to_pose, /follow_waypoints, /abort"
+        )
 
-            if feedback and cycle % 5 == 0:
-                eta = Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9
-                dist = feedback.distance_remaining
-                print(f'[Nav2] Distance remaining: {dist:.2f} m | ETA: {eta:.0f} s')
+    # ------------------------------------------------------------------
+    # ROS helpers
+    # ------------------------------------------------------------------
 
-                elapsed = Duration.from_msg(feedback.navigation_time).nanoseconds / 1e9
-                if elapsed > max_duration_sec:
-                    print(f'[Nav2] Task exceeded limit of {max_duration_sec}s. Aborting...')
-                    self.abort_mission()
-
-        result = self.navigator.getResult()
-        if result == TaskResult.SUCCEEDED:
-            self.publish_status("SUCCEEDED")
-        elif result == TaskResult.CANCELED:
-            self.publish_status("CANCELED")
-        else:
-            self.publish_status("FAILED")
-
-        
-
-
-    def handle_nav_to_pose(self, msg: PoseStamped):
-        """Commands the robot to navigate to a single goal pose."""
-        self.navigator.waitUntilNav2Active()
-        self.navigator.goToPose(msg)
-        self.monitor_task()
-
-
-    def handle_follow_waypoints(self, msg: PoseArray):
-        """Commands the robot to follow a series of waypoints."""
-        self.navigator.waitUntilNav2Active()
-        
-        # Convert individual Pose objects in PoseArray to PoseStamped objects
-        waypoints = []
-        for pose in msg.poses:
-            pose_stamped = PoseStamped()
-            pose_stamped.header = msg.header
-            pose_stamped.pose = pose
-            waypoints.append(pose_stamped)
-            
-        self.navigator.followWaypoints(waypoints)
-        self.monitor_task()
-    
-    def handle_abort(self, msg: Empty):
-        self.abort_mission()
-
-    def abort_mission(self):
-        """Immediately cancels any active navigation task."""
-        print('[Nav2] Force aborting current navigation mission...')
-        self.navigator.cancelTask()
-        
     def publish_status(self, status_msg: str):
         msg = String()
         msg.data = status_msg
         self.status_pub.publish(msg)
+        self.get_logger().info(f"MISSION STATUS: {status_msg}")
+
+    def publish_feedback(self, distance_remaining=0.0, eta_sec=0.0):
+        msg = String()
+        msg.data = json.dumps({
+            "distance_remaining": float(distance_remaining or 0.0),
+            "eta_sec": float(eta_sec or 0.0),
+        })
+        self.feedback_pub.publish(msg)
+
+    def set_initial_pose(self, msg: PoseWithCovarianceStamped):
+        self.navigator.setInitialPose(msg)
+        self.publish_status("INITIAL_POSE_SET")
+
+    def _service_exists(self, service_name: str) -> bool:
+        try:
+            return any(
+                name == service_name
+                for name, _types in self.navigator.get_service_names_and_types()
+            )
+        except Exception:
+            return False
+
+    def _detect_localizer(self):
+        """
+        Return the lifecycle localizer name if one is visible.
+
+        This prevents BasicNavigator from waiting forever for /amcl/get_state
+        when the active system is using slam_toolbox or another localizer.
+        """
+        candidates = (
+            ("amcl", "/amcl/get_state"),
+            ("slam_toolbox", "/slam_toolbox/get_state"),
+            ("localization", "/localization/get_state"),
+        )
+
+        for name, service in candidates:
+            if self._service_exists(service):
+                return name
+
+        return None
+
+    def wait_for_nav2(self, timeout_sec=45.0):
+        """
+        Wait for Nav2 without assuming AMCL exists.
+
+        BasicNavigator's default is localizer='amcl'. That is the direct reason
+        your previous commander printed:
+            amcl/get_state service not available, waiting...
+        """
+        self.get_logger().info("Waiting for Nav2 to become active...")
+
+        localizer = None
+        deadline = time.monotonic() + timeout_sec
+
+        # Give lifecycle nodes a short opportunity to appear.
+        while time.monotonic() < deadline and not self.shutdown_requested:
+            localizer = self._detect_localizer()
+
+            # bt_navigator's lifecycle service is a useful indication that the
+            # Nav2 navigation stack has started.
+            bt_ready = self._service_exists("/bt_navigator/get_state")
+
+            if bt_ready or localizer is not None:
+                break
+
+            time.sleep(0.25)
+
+        if self.shutdown_requested:
+            return False
+
+        try:
+            # localizer=None is intentional: do NOT force /amcl/get_state.
+            # Nav2 still waits for bt_navigator through BasicNavigator.
+            self.navigator.waitUntilNav2Active(
+                localizer=localizer,
+                navigator="bt_navigator",
+            )
+            self.get_logger().info(
+                f"Nav2 is active (localizer={localizer or 'not specified'})."
+            )
+            return True
+        except Exception as exc:
+            self.get_logger().error(f"Nav2 activation failed: {exc}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Navigation
+    # ------------------------------------------------------------------
+
+    def _begin_goal(self) -> bool:
+        with self.goal_lock:
+            if self.goal_running:
+                self.get_logger().warning("A navigation mission is already running.")
+                return False
+            self.goal_running = True
+            return True
+
+    def _end_goal(self):
+        with self.goal_lock:
+            self.goal_running = False
+
+    def monitor_task(self, max_duration_sec=120.0, label="NAVIGATION"):
+        """
+        Monitor a BasicNavigator action.
+
+        The navigator node is in the MultiThreadedExecutor, so action feedback
+        and result callbacks continue to be processed while this worker waits.
+        """
+        start = time.monotonic()
+        last_log = 0.0
+
+        while not self.navigator.isTaskComplete():
+            if self.shutdown_requested:
+                self.navigator.cancelTask()
+                break
+
+            now = time.monotonic()
+
+            if now - last_log >= 1.0:
+                feedback = self.navigator.getFeedback()
+                if feedback is not None:
+                    try:
+                        eta = (
+                            Duration.from_msg(
+                                feedback.estimated_time_remaining
+                            ).nanoseconds
+                            / 1e9
+                        )
+                    except Exception:
+                        eta = 0.0
+
+                    distance = getattr(feedback, "distance_remaining", 0.0)
+                    self.publish_feedback(distance, eta)
+                    self.get_logger().info(
+                        f"[{label}] distance={distance:.2f} m | ETA={eta:.0f} s"
+                    )
+
+                last_log = now
+
+            if now - start > max_duration_sec:
+                self.get_logger().warning(
+                    f"[{label}] exceeded {max_duration_sec:.0f}s. Aborting."
+                )
+                self.navigator.cancelTask()
+                break
+
+            time.sleep(0.05)
+
+        result = self.navigator.getResult()
+
+        if result == TaskResult.SUCCEEDED:
+            status = f"{label}_SUCCEEDED"
+        elif result == TaskResult.CANCELED:
+            status = f"{label}_CANCELED"
+        else:
+            status = f"{label}_FAILED"
+
+        self.publish_status(status)
+        return result
+
+    def handle_nav_to_pose(self, msg: PoseStamped):
+        if not self._begin_goal():
+            self.publish_status("BUSY")
+            return
+
+        threading.Thread(
+            target=self._run_nav_to_pose,
+            args=(msg,),
+            daemon=True,
+            name="nav-to-pose-worker",
+        ).start()
+
+    def _run_nav_to_pose(self, msg: PoseStamped):
+        try:
+            self.publish_status("NAVIGATING")
+
+            if not self.wait_for_nav2():
+                self.publish_status("NAV2_NOT_READY")
+                return
+
+            self.get_logger().info(
+                f"Sending goal: x={msg.pose.position.x:.3f}, "
+                f"y={msg.pose.position.y:.3f}"
+            )
+
+            self.navigator.goToPose(msg)
+            self.monitor_task(label="NAVIGATION")
+
+        except Exception as exc:
+            self.get_logger().error(f"GoToPose failed: {exc}")
+            self.publish_status("NAVIGATION_FAILED")
+        finally:
+            self._end_goal()
+
+    def handle_follow_waypoints(self, msg: PoseArray):
+        if not msg.poses:
+            self.get_logger().warning("Received an empty waypoint list.")
+            self.publish_status("WAYPOINTS_EMPTY")
+            return
+
+        if not self._begin_goal():
+            self.publish_status("BUSY")
+            return
+
+        # Copy the message before handing it to the worker thread.
+        poses = list(msg.poses)
+        frame_id = msg.header.frame_id or "map"
+        stamp = msg.header.stamp
+
+        threading.Thread(
+            target=self._run_follow_waypoints,
+            args=(poses, frame_id, stamp),
+            daemon=True,
+            name="waypoint-worker",
+        ).start()
+
+    def _run_follow_waypoints(self, poses, frame_id, stamp):
+        try:
+            count = len(poses)
+            self.publish_status(f"WAYPOINTS_START:{count}")
+
+            if not self.wait_for_nav2():
+                self.publish_status("NAV2_NOT_READY")
+                return
+
+            waypoints = []
+
+            for index, pose in enumerate(poses, start=1):
+                goal = PoseStamped()
+                goal.header.frame_id = frame_id
+
+                # A current timestamp is preferable if the web message is old.
+                goal.header.stamp = self.get_clock().now().to_msg()
+                goal.pose = pose
+
+                # Guard against an invalid zero quaternion from the web UI.
+                q = goal.pose.orientation
+                q_norm = (
+                    q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w
+                )
+                if q_norm < 1e-12:
+                    goal.pose.orientation.w = 1.0
+
+                waypoints.append(goal)
+                self.get_logger().info(
+                    f"WP {index}/{count}: "
+                    f"x={goal.pose.position.x:.3f}, "
+                    f"y={goal.pose.position.y:.3f}"
+                )
+
+            self.navigator.followWaypoints(waypoints)
+            self.monitor_task(
+                max_duration_sec=max(120.0, 90.0 * count),
+                label=f"WAYPOINTS({count})",
+            )
+
+        except Exception as exc:
+            self.get_logger().error(f"FollowWaypoints failed: {exc}")
+            self.publish_status("WAYPOINTS_FAILED")
+        finally:
+            self._end_goal()
+
+    # ------------------------------------------------------------------
+    # Abort / map saving
+    # ------------------------------------------------------------------
+
+    def handle_abort(self, _msg: Empty):
+        self.abort_mission()
+
+    def abort_mission(self):
+        self.get_logger().warning("Aborting current navigation mission...")
+        try:
+            self.navigator.cancelTask()
+        except Exception as exc:
+            self.get_logger().error(f"Could not cancel Nav2 task: {exc}")
+        self.publish_status("ABORTED")
+
+    def handle_save_map(self, msg: String):
+        map_filename = msg.data if msg.data else "my_map"
+        self.publish_status(f"SAVING_MAP:{map_filename}")
+
+        try:
+            cmd = [
+                "ros2",
+                "run",
+                "nav2_map_server",
+                "map_saver_cli",
+                "-f",
+                map_filename,
+            ]
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30
+            )
+
+            if res.returncode == 0:
+                self.get_logger().info("Map saved successfully.")
+                self.publish_status(f"MAP_SAVED:{map_filename}")
+            else:
+                self.get_logger().error(f"Map saver failed: {res.stderr}")
+                self.publish_status("MAP_SAVE_FAILED")
+
+        except Exception as exc:
+            self.get_logger().error(f"Map saver error: {exc}")
+            self.publish_status("MAP_SAVE_ERROR")
 
 
 def main():
     rclpy.init()
-    commander = CommanderNode("commande_node")
-    executor = SingleThreadedExecutor()
+
+    commander = CommanderNode()
+    executor = MultiThreadedExecutor(num_threads=4)
+
+    # CRITICAL: BasicNavigator is a Node. The old code only added commander,
+    # so BasicNavigator's action/service callbacks were not being spun.
     executor.add_node(commander)
+    executor.add_node(commander.navigator)
 
     try:
-        executor.spin() 
+        executor.spin()
+
     except KeyboardInterrupt:
-        commander.abort_mission()
+        pass
 
     finally:
+        commander.shutdown_requested = True
+        try:
+            commander.navigator.cancelTask()
+        except Exception:
+            pass
+
         executor.shutdown()
-        commander.destroy_node()
         commander.navigator.destroy_node()
+        commander.destroy_node()
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

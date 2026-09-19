@@ -1,0 +1,39 @@
+<svg xmlns="http://w3.org" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="7.5" fill="#007bff"/>
+
+  <!-- Rescaled and Centered Vehicle Group -->
+  <g fill="#ffffff">
+    <!-- Antenna Mast -->
+    <rect x="5.15" y="7.0" width="1.2" height="8.0" rx="0.6"/>
+    
+    <!-- Antenna Tip -->
+    <circle cx="5.75" cy="6.2" r="1.5"/>
+    
+    <!-- Main Chassis (Expanded horizontally and vertically) -->
+    <path d="M 8.0 11.5 
+             L 21.5 11.5 
+             A 5.5 5.5 0 0 1 27.0 17.0 
+             L 27.0 21.0
+             A 1.5 1.5 0 0 1 25.5 22.5 
+             L 6.5 22.5 
+             A 1.5 1.5 0 0 1 5.0 21.0 
+             L 5.0 14.5 
+             A 3.0 3.0 0 0 1 8.0 11.5 Z"/>
+
+    <!-- Window/Cutout -->
+    <rect x="23.0" y="14.8" width="2.6" height="1.6" rx="0.5" fill="#007bff"/>
+
+    <!-- Front Wheel (Right) -->
+    <circle cx="22.5" cy="24.0" r="5.0"/>
+
+    <!-- Rear Wheel (Left) -->
+    <circle cx="9.5" cy="24.0" r="5.0"/>
+  </g>
+
+  <!-- Wheel Cutouts -->
+  <g fill="#007bff">
+    <circle cx="22.5" cy="24.0" r="2.3"/>
+    <circle cx="9.5" cy="24.0" r="2.3"/>
+  </g>
+</svg>

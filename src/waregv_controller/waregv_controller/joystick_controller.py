@@ -9,15 +9,29 @@ class JoystickController(Node):
 
     def __init__(self):
         super().__init__('joystick_controller')
+        if not self.has_parameter('use_sim_time'):
+            self.declare_parameter('use_sim_time', True)
 
-        # Create Subscriber
-        self.joy_sub_ = self.create_subscription(
-            Joy,
-            '/joy',
-            self.joy_callback,
-            10
-        )
-
+        self.use_sim_time = self.get_parameter('use_sim_time').value
+        
+        
+        if not self.use_sim_time:
+            # Create Subscriber
+            self.joy_sub_ = self.create_subscription(
+                Joy,
+                '/joy',
+                self.joy_callback,
+                10
+            )
+        else: 
+            # Create Subscriber
+            self.joy_sub_ = self.create_subscription(
+                Joy,
+                '/joy',
+                self.joy_callback,
+                10
+            )
+            
         # Create Publisher
         self.cmd_pub_ = self.create_publisher(
             Twist,
@@ -33,25 +47,31 @@ class JoystickController(Node):
         self.get_logger().info('JoystickController node has been initialized.')
 
     def joy_callback(self, msg: Joy):
+        
+    
         if len(msg.axes) < 2:
             return
-        enable_button_pressed = msg.buttons[4] == 1 
+        if not self.use_sim_time: 
+            enable_button_pressed = msg.buttons[4] == 1 
 
-        if not enable_button_pressed:
-            if self.send_stop == False:
-                cmd_msg = Twist()
-                self.cmd_pub_.publish(cmd_msg)
-                self.send_stop = True
-            return
-        else:
-            self.send_stop = False
+            if not enable_button_pressed:
+                if self.send_stop == False:
+                    cmd_msg = Twist()
+                    self.cmd_pub_.publish(cmd_msg)
+                    self.send_stop = True
+                return
+            else:
+                self.send_stop = False
         
         max_lin = self.get_parameter('max_linear_vel').value
         max_ang = self.get_parameter('max_angular_vel').value
 
-    
-        linear_cmd = msg.axes[1] * max_lin
-        angular_cmd = msg.axes[0] * max_ang
+        if self.use_sim_time:
+            linear_cmd = msg.axes[1] * max_lin
+            angular_cmd = -1*msg.axes[3] * max_ang
+        else: 
+            linear_cmd = msg.axes[1] * max_lin
+            angular_cmd = msg.axes[0] * max_ang
  
         cmd_msg = Twist()
         cmd_msg.linear.x = linear_cmd

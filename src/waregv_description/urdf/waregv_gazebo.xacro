@@ -41,7 +41,7 @@
    <gazebo>
    
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-        <parameters>$(find waregv_description)/config/controller.yaml</parameters>
+        <parameters>$(find waregv_bringup)/config/controller.yaml</parameters>
     </plugin>
     
    

@@ -9,7 +9,12 @@ import numpy as np
 class InverseKinematics(Node):
     def __init__(self):
         super().__init__('inverse_kinematics')
+        
+        if not self.has_parameter('use_sim_time'):
+            self.declare_parameter('use_sim_time', True)
 
+        self.use_sim_time = self.get_parameter('use_sim_time').value
+        
         self.subscription = self.create_subscription(
             Twist,
             '/cmd_vel_unstamped',
@@ -33,7 +38,10 @@ class InverseKinematics(Node):
         angular_z = msg.angular.z
 
         cmd_msg = Float64MultiArray()
-        cmd_msg.data = self.inverse_kinematics(linear_x, angular_z)
+        if self.use_sim_time:
+          cmd_msg.data = self.inverse_kinematics(linear_x, -1*angular_z)
+        else:
+            cmd_msg.data = self.inverse_kinematics(linear_x, angular_z)
 
         self.publisher.publish(cmd_msg)
         

@@ -8,8 +8,9 @@ done
 echo "Allowing system resources 5 seconds to settle..."
 sleep 5
 
-MAPPING_ENABLE="true"
-NAVIGATION_ENABLE="true"
+
+MAPPING_ENABLE="false"
+NAVIGATION_ENABLE="false"
 MAX_LINEAR_VELOCITY="0.5"
 MAX_ANGULAR_VELOCITY="3.14159265359"
 WHEEL_RADIUS="0.0325"
@@ -52,6 +53,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+cd ~/waregv/waregv_ws
 
 colcon build
 source /opt/ros/jazzy/setup.bash

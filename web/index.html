@@ -3,1149 +3,173 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Milusions WareGV — Autonomous Navigation Dashboard</title>
+    <title>WareGV Suite - Milusions</title>
     <!-- ROS Web Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/easeljs@1.0.2/lib/easeljs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/eventemitter2@6.4.9/lib/eventemitter2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/roslib@1.3.0/build/roslib.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ros2d@0.9.0/build/ros2d.min.js"></script>
-
+    <!-- Markdown Parser for Beautified Input/Output -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Roboto -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
     <style>
-        :root {
-            --primary: #0077ff;
-            --primary-glow: rgba(0, 119, 255, 0.35);
-            --danger: #E30035;
-            --success: #009D5B;
-            --slate: #393E46;
-            --bg-canvas: #0a0d14;
-            --bg-canvas-2: #05070c;
-            --card-bg: #12161f;
-            --card-bg-2: #171c27;
-            --text-main: #eef2f8;
-            --text-muted: #8b93a3;
-            --border-color: #232936;
-            --sidebar-bg: #0d1017;
-            --map-bg: #060911;
-        }
-
-        body.light-theme {
-            --bg-canvas: #f4f7fc;
-            --bg-canvas-2: #e9eef7;
-            --card-bg: #ffffff;
-            --card-bg-2: #f1f5f9;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --border-color: #e2e8f0;
-            --sidebar-bg: #ffffff;
-            --map-bg: #0b0f19;
-        }
-
-        * { box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background:
-                radial-gradient(circle at 15% 0%, rgba(0,119,255,0.10), transparent 45%),
-                radial-gradient(circle at 100% 100%, rgba(0,157,91,0.06), transparent 40%),
-                var(--bg-canvas);
-            color: var(--text-main);
-            margin: 0;
-            padding: 0;
-            display: flex;
-            height: 100vh;
-            box-sizing: border-box;
-            overflow: hidden;
-            -webkit-font-smoothing: antialiased;
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-
-        body.light-theme { background: radial-gradient(circle at 15% 0%, rgba(0,119,255,0.06), transparent 45%), radial-gradient(circle at 100% 100%, rgba(0,157,91,0.04), transparent 40%), var(--bg-canvas); }
-
-        body * { transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease; }
-
-        /* ----- Side Navigation (Sidebar) ----- */
-        .sidebar {
-            width: 260px;
-            background-color: var(--sidebar-bg);
-            border-right: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            padding: 1.5rem 1rem;
-            box-sizing: border-box;
-            z-index: 10;
-        }
-
-        .sidebar-top {
-            display: flex;
-            flex-direction: column;
-            gap: 2rem;
-        }
-
-        .brand-container {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding-left: 0.5rem;
-        }
-
-        .brand-logo {
-            width: 38px;
-            height: 38px;
-            background: linear-gradient(135deg, var(--primary), #0056cc);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 12px rgba(0, 119, 255, 0.25);
-        }
-
-        .brand-logo svg {
-            width: 22px;
-            height: 22px;
-            fill: #ffffff;
-        }
-
-        .brand-title h1 {
-            font-size: 1rem;
-            font-weight: 700;
-            margin: 0;
-            color: var(--slate);
-            letter-spacing: -0.02em;
-        }
-
-        .brand-title p {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            margin: 0;
-            font-weight: 500;
-        }
-
-        .nav-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 0.35rem;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.75rem 1rem;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: var(--text-muted);
-            text-decoration: none;
-            transition: all 0.2s ease;
-            cursor: pointer;
-        }
-
-        .nav-item:hover, .nav-item.active {
-            background-color: rgba(0, 119, 255, 0.12);
-            color: #6cb0ff;
-        }
-
-        .sidebar-footer {
-            padding: 0.75rem;
-            background: var(--card-bg-2);
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .operator-info h4 {
-            font-size: 0.8rem;
-            margin: 0;
-            color: var(--text-main);
-        }
-
-        .operator-info p {
-            font-size: 0.7rem;
-            margin: 0;
-            color: var(--text-muted);
-        }
-
-        /* ----- Theme Toggle ----- */
-        .theme-toggle-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-top: 0.75rem;
-            padding: 0.6rem 0.85rem;
-            background: var(--card-bg-2);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-        }
-        .theme-toggle-label {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: var(--text-muted);
-        }
-        .theme-toggle-label svg { fill: var(--text-muted); flex-shrink: 0; }
-
-        .theme-switch {
-            width: 42px;
-            height: 24px;
-            border-radius: 14px;
-            border: 1px solid var(--border-color);
-            background: var(--bg-canvas-2);
-            cursor: pointer;
-            position: relative;
-            padding: 0;
-            flex-shrink: 0;
-            transition: background 0.25s ease;
-        }
-        .theme-switch-knob {
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: var(--primary);
-            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
-            transition: transform 0.25s ease, background 0.25s ease;
-        }
-        body.light-theme .theme-switch { background: #dbe4f0; }
-        body.light-theme .theme-switch-knob {
-            transform: translateX(18px);
-            background: #f5b942;
-        }
-
-        /* ----- Main Layout Wrapper ----- */
-        .main-wrapper {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            overflow: hidden;
-        }
-
-        /* ----- Top Header Bar ----- */
-        .header-bar {
-            height: 70px;
-            background-color: var(--card-bg);
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 2rem;
-            box-sizing: border-box;
-            z-index: 5;
-        }
-
-        .header-title h2 {
-            font-size: 1.15rem;
-            font-weight: 700;
-            margin: 0;
-            color: var(--text-main);
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.35rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            background-color: var(--card-bg-2);
-            color: var(--text-muted);
-            border: 1px solid var(--border-color);
-        }
-        .status-badge.connected {
-            background-color: rgba(0, 157, 91, 0.1);
-            color: var(--success);
-            border-color: rgba(0, 157, 91, 0.2);
-        }
-
-        .header-audio-btn {
-            background-color: var(--primary);
-            color: #ffffff;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            box-shadow: 0 2px 8px rgba(0, 119, 255, 0.3);
-            transition: opacity 0.2s;
-        }
-        .header-audio-btn:hover { opacity: 0.9; }
-
-        /* ----- Dashboard Content Workspace ----- */
-        .dashboard-content {
-            flex: 1;
-            padding: 1.25rem 1.5rem 1.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1.25rem;
-            box-sizing: border-box;
-            overflow: hidden;
-        }
-
-        /* ----- Telemetry Strip: Rover visual + stats ----- */
-        .telemetry-strip {
-            display: flex;
-            gap: 1.25rem;
-            height: 230px;
-            flex-shrink: 0;
-        }
-
-        .rover-card {
-            width: 340px;
-            flex-shrink: 0;
-            background:
-                radial-gradient(circle at 30% 20%, rgba(0,119,255,0.14), transparent 55%),
-                var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.1rem 1.25rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .rover-visual {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: -0.25rem 0 0.25rem;
-        }
-
-        .rover-visual svg { width: 100%; max-width: 220px; filter: drop-shadow(0 12px 18px rgba(0,119,255,0.25)); }
-
-        .rover-speed-row {
-            display: flex;
-            align-items: flex-end;
-            justify-content: space-between;
-        }
-
-        .rover-speed-row .label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-muted);
-            font-weight: 700;
-            margin-bottom: 0.2rem;
-        }
-
-        .rover-speed-row .value {
-            font-size: 1.9rem;
-            font-weight: 700;
-            color: var(--text-main);
-            line-height: 1;
-        }
-
-        .rover-speed-row .value span { font-size: 0.9rem; font-weight: 600; color: var(--text-muted); margin-left: 0.25rem; }
-
-        .rpm-ring-wrap { position: relative; width: 74px; height: 74px; flex-shrink: 0; }
-        .rpm-ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-        .rpm-ring-bg { fill: none; stroke: var(--border-color); stroke-width: 6; }
-        .rpm-ring-fg { fill: none; stroke: var(--primary); stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
-        .rpm-ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .rpm-ring-text b { font-size: 0.95rem; color: var(--text-main); line-height: 1; }
-        .rpm-ring-text small { font-size: 0.55rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-
-        .telemetry-info-grid {
-            flex: 1;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-        }
-
-        .info-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1rem 1.1rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-        }
-
-        .info-card-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .info-card .icon-badge {
-            width: 30px;
-            height: 30px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0, 119, 255, 0.15);
-        }
-        .info-card .icon-badge svg { width: 16px; height: 16px; fill: var(--primary); }
-        .info-card.accent-green .icon-badge { background: rgba(0, 157, 91, 0.15); }
-        .info-card.accent-green .icon-badge svg { fill: var(--success); }
-        .info-card.accent-red .icon-badge { background: rgba(227, 0, 53, 0.15); }
-        .info-card.accent-red .icon-badge svg { fill: var(--danger); }
-
-        .info-card .card-label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-muted);
-            font-weight: 700;
-        }
-
-        .info-card .card-value {
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: var(--text-main);
-        }
-        .info-card .card-value span { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
-
-        .info-card .card-sub {
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        }
-
-        .battery-track {
-            width: 100%;
-            height: 6px;
-            background: var(--border-color);
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 0.4rem;
-        }
-        .battery-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--success), #34d399);
-            border-radius: 4px;
-        }
-
-        /* ----- Main Row (map + control panel) ----- */
-        .main-row {
-            flex: 1;
-            display: flex;
-            gap: 1.5rem;
-            min-height: 0;
-        }
-
-        /* Map Workspace Card */
-        .map-workspace {
-            flex: 1;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .map-container {
-            background-color: var(--map-bg);
-            border-radius: 10px;
-            position: relative;
-            overflow: hidden;
-            flex: 1;
-            width: 100%;
-            touch-action: none;
-            border: 1px solid var(--border-color);
-        }
-
-        #map {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) rotate(-90deg);
-            transform-origin: center center;
-            cursor: crosshair;
-        }
-
-        /* Control Panel Workspace Card */
-        .control-panel {
-            width: 360px;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.25rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            overflow-y: auto;
-        }
-
-        .panel-section-title {
-            font-size: 0.8rem;
-            font-weight: 700;
-            color: var(--text-main);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 0.25rem;
-        }
-
-        .coords-box {
-            background: var(--card-bg-2);
-            border: 1px solid var(--border-color);
-            padding: 0.75rem;
-            border-radius: 8px;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 0.8rem;
-            color: var(--text-main);
-        }
-
-        /* ----- Wheel Velocity Control ----- */
-        .wheel-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.6rem;
-            margin-top: 0.5rem;
-        }
-        .wheel-slider-card {
-            background: var(--card-bg-2);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 0.6rem 0.7rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.35rem;
-        }
-        .wheel-slider-card label {
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: var(--text-main);
-            display: flex;
-            align-items: baseline;
-            gap: 0.35rem;
-        }
-        .wheel-tag {
-            font-size: 0.62rem;
-            font-weight: 500;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-        .wheel-slider-card input[type="range"] {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 5px;
-            border-radius: 4px;
-            background: linear-gradient(90deg, var(--danger) 0%, var(--border-color) 50%, var(--primary) 100%);
-            outline: none;
-            margin: 0.15rem 0;
-        }
-        .wheel-slider-card input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: #ffffff;
-            border: 2px solid var(--primary);
-            cursor: pointer;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-        }
-        .wheel-slider-card input[type="range"]::-moz-range-thumb {
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: #ffffff;
-            border: 2px solid var(--primary);
-            cursor: pointer;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-        }
-        .wheel-val {
-            align-self: flex-end;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: var(--primary);
-        }
-        .wheel-hint {
-            font-size: 0.68rem;
-            color: var(--text-muted);
-            margin-top: 0.5rem;
-            line-height: 1.4;
-        }
-        .wheel-hint code {
-            background: var(--card-bg-2);
-            border: 1px solid var(--border-color);
-            padding: 0.05rem 0.3rem;
-            border-radius: 4px;
-            color: var(--text-main);
-        }
-
-        .input-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 0.5rem;
-        }
-        
-        label { 
-            font-size: 0.75rem; 
-            font-weight: 600; 
-            color: var(--text-muted); 
-            display: block; 
-            margin-bottom: 0.25rem;
-        }
-        
-        input[type="number"] {
-            background-color: var(--card-bg-2);
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            padding: 0.5rem;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            width: 100%;
-            box-sizing: border-box;
-            outline: none;
-        }
-        input[type="number"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
-
-        .mode-toggle {
-            display: flex;
-            gap: 1rem;
-            background: var(--card-bg-2);
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-        }
-        .mode-toggle label {
-            cursor: pointer;
-            color: var(--text-muted);
-            font-size: 0.8rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            margin: 0;
-        }
-
-        button {
-            cursor: pointer;
-            padding: 0.7rem 1rem;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.85rem;
-            transition: all 0.15s ease;
-            width: 100%;
-        }
-        button:hover { opacity: 0.9; }
-
-        .btn-row { display: flex; gap: 0.5rem; }
-        .btn-primary { background-color: var(--primary); color: white; box-shadow: 0 2px 6px rgba(0, 119, 255, 0.2); }
-        .btn-success { background-color: var(--success); color: white; box-shadow: 0 2px 6px rgba(0, 157, 91, 0.2); }
-        .btn-danger { background-color: var(--danger); color: white; box-shadow: 0 2px 6px rgba(227, 0, 53, 0.2); }
-        .btn-secondary { background-color: var(--card-bg-2); color: var(--text-main); border: 1px solid var(--border-color); }
-        .btn-secondary:hover { background-color: #1f2531; }
-
-        .divider {
-            height: 1px;
-            background: var(--border-color);
-            border: none;
-            margin: 0.25rem 0;
-        }
-
-        .waypoints-list {
-            font-size: 0.75rem;
-            max-height: 100px;
-            overflow-y: auto;
-            color: var(--text-muted);
-            margin-top: 0.4rem;
-        }
-        .waypoints-list div { padding: 0.2rem 0; border-bottom: 1px solid var(--border-color); }
-
-        /* ----- Voice Assistant Modal (Centered Robot + Right Sidebar History) ----- */
-        .voice-modal {
-            display: none; 
-            position: fixed; 
-            inset: 0; 
-            background: rgba(57, 62, 70, 0.75); 
-            z-index: 9999;
-            backdrop-filter: blur(6px);
-            align-items: center; 
-            justify-content: center; 
-            flex-direction: column;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-
-        .voice-modal.active {
-            display: flex;
-            opacity: 1;
-        }
-
-        .close-modal-btn {
-            position: absolute;
-            top: 2rem;
-            right: 3rem;
-            background: #ffffff;
-            border: none;
-            color: var(--slate);
-            font-size: 1.5rem;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            z-index: 10;
-        }
-        .close-modal-btn:hover { background: #f8fafc; }
-
-        /* Really Big Helio Title Positioned at the Top */
-        .modal-assistant-title {
-            position: absolute;
-            top: 2.5rem;
-            font-size: 3rem;
-            font-weight: 700;
-            color: #ffffff;
-            letter-spacing: 0.02em;
-            text-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-
-        /* Centered Main Column for Robot & Captions */
-        .modal-main-column {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            margin-top: 3rem;
-            max-width: 600px;
-            width: 100%;
-            position: relative;
-        }
-
-        .robot-face-wrap {
-            position: relative;
-        }
-
-        /* Emo Robot Face */
-        .robot-face {
-            background: #0b0f19;
-            width: 440px;
-            height: 240px;
-            border-radius: 40px;
-            display: flex;
-            justify-content: space-evenly;
-            align-items: center;
-            padding: 0 44px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.25);
-            border: 2px solid #1f2937;
-            transition: all 0.3s ease;
-            overflow: hidden;
-        }
-
-        .eye {
-            width: 96px;
-            height: 148px;
-            background: var(--primary);
-            border-radius: 48px;
-            transition: all 0.25s ease;
-            transform-origin: center;
-        }
-
-        .robot-face.listening { border-color: rgba(0, 119, 255, 0.6); box-shadow: 0 0 30px rgba(0, 119, 255, 0.25); }
-        .robot-face.listening .eye { animation: blink 4s infinite, look-around 6s ease-in-out infinite; }
-        .robot-face.listening .eye:nth-child(2) { animation-delay: 0s, 0.15s; }
-
-        @keyframes blink {
-            0%, 48%, 52%, 100% { transform: scaleY(1) translateX(var(--eye-x, 0)); }
-            50% { transform: scaleY(0.1) translateX(var(--eye-x, 0)); }
-        }
-
-        @keyframes look-around {
-            0%, 100% { transform: translateX(0); }
-            20% { transform: translateX(-14px); }
-            40% { transform: translateX(-14px); }
-            55% { transform: translateX(16px); }
-            75% { transform: translateX(16px); }
-            90% { transform: translateX(0); }
-        }
-
-        .robot-face.thinking { border-color: rgba(227, 0, 53, 0.6); box-shadow: 0 0 30px rgba(227, 0, 53, 0.25); }
-        .robot-face.thinking .eye {
-            background: var(--danger);
-            height: 20px; 
-            border-radius: 10px;
-            animation: think-shift 0.7s infinite alternate ease-in-out;
-        }
-
-        @keyframes think-shift {
-            0% { transform: translateX(-20px); }
-            100% { transform: translateX(20px); }
-        }
-
-        .robot-face.speaking { border-color: rgba(0, 157, 91, 0.6); box-shadow: 0 0 30px rgba(0, 157, 91, 0.25); }
-        .robot-face.speaking .eye {
-            background: var(--success);
-            height: 52px;
-            border-radius: 52px 52px 10px 10px;
-            animation: talk-bounce 0.25s infinite alternate ease-in-out;
-        }
-
-        @keyframes talk-bounce {
-            0% { transform: scaleY(1) translateY(0); }
-            100% { transform: scaleY(1.12) translateY(-5px); }
-        }
-
-        /* Comic-book style speech bubble, top-right of the robot face */
-        .speech-bubble {
-            position: absolute;
-            top: -18px;
-            right: -60px;
-            max-width: 260px;
-            background: #ffffff;
-            color: #12161f;
-            font-size: 0.95rem;
-            font-weight: 700;
-            line-height: 1.3;
-            padding: 0.75rem 1rem;
-            border-radius: 18px 18px 18px 4px;
-            box-shadow: 0 10px 24px rgba(0,0,0,0.35);
-            opacity: 0;
-            transform: translateY(6px) scale(0.9);
-            transition: opacity 0.25s ease, transform 0.25s ease;
-            pointer-events: none;
-            z-index: 5;
-        }
-        .speech-bubble::after {
-            content: "";
-            position: absolute;
-            bottom: -10px;
-            left: 24px;
-            width: 0;
-            height: 0;
-            border-left: 10px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 12px solid #ffffff;
-        }
-        .speech-bubble.show {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-        }
-
-        .caption-container {
-            margin-top: 1.5rem;
-            max-width: 500px;
-            text-align: center;
-            min-height: 70px;
-            padding: 0 1rem;
-        }
-        .caption-text {
-            font-size: 1.4rem;
-            color: #ffffff;
-            font-weight: 600;
-            line-height: 1.4;
-            text-shadow: 0 2px 6px rgba(0,0,0,0.4);
-        }
-        .caption-status {
-            font-size: 0.75rem;
-            color: #cbd5e1;
-            margin-bottom: 0.3rem;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            font-weight: 700;
-        }
-
-        /* ----- Session History Pinned to the Far Right Side ----- */
-        .modal-history-column {
-            position: absolute;
-            right: 3rem;
-            top: 6.5rem;
-            bottom: 3rem;
-            width: 360px;
-            background: #0b0f19;
-            border: 1px solid #1f2937;
-            border-radius: 16px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.3);
-            z-index: 5;
-        }
-
-        .history-header {
-            padding: 0.75rem 1rem;
-            background: #111827;
-            border-bottom: 1px solid #1f2937;
-            font-size: 0.8rem;
-            font-weight: 700;
-            color: #cbd5e1;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-        }
-
-        .history-list {
-            flex: 1;
-            padding: 0.75rem;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 0.6rem;
-            font-size: 0.85rem;
-        }
-
-        .history-item {
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            line-height: 1.35;
-            word-break: break-word;
-        }
-
-        .history-item.you {
-            background: rgba(0, 119, 255, 0.15);
-            color: #93c5fd;
-            border-left: 3px solid var(--primary);
-            align-self: stretch;
-        }
-
-        .history-item.agent {
-            background: rgba(0, 157, 91, 0.15);
-            color: #86efac;
-            border-left: 3px solid var(--success);
-            align-self: stretch;
-        }
-
-        .history-label {
-            font-weight: 700;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            margin-bottom: 0.15rem;
-            letter-spacing: 0.05em;
-        }
-
-        /* ----- Toast notification for connection / network errors ----- */
-        .app-toast {
-            position: fixed;
-            bottom: 1.75rem;
-            left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            background: #171c27;
-            color: #eef2f8;
-            border: 1px solid var(--danger);
-            padding: 0.7rem 1.1rem;
-            border-radius: 10px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            box-shadow: 0 10px 26px rgba(0,0,0,0.4);
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.25s ease, transform 0.25s ease;
-            z-index: 9998;
-            max-width: 320px;
-            text-align: center;
-        }
-        .app-toast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-
-        /* ----- Helio: single centered floating sparkle trigger ----- */
-        .helio-fab {
-            position: fixed;
-            top: 1.25rem;
-            left: 50%;
-            transform: translateX(-50%);
-            height: 54px;
-            padding: 0 1.4rem;
-            border-radius: 28px;
-            border: none;
-            cursor: pointer;
-            z-index: 100;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.55rem;
-            width: max-content;
-            background: radial-gradient(circle at 25% 25%, #2b8cff, #0056cc 75%);
-            box-shadow: 0 0 0 5px rgba(0, 119, 255, 0.10), 0 6px 18px rgba(0, 119, 255, 0.45);
-            animation: helio-pulse 2.6s ease-in-out infinite;
-            transition: transform 0.15s ease;
-        }
-        .helio-fab:hover { transform: translateX(-50%) scale(1.06); }
-        .helio-fab svg { width: 22px; height: 22px; fill: #ffffff; flex-shrink: 0; }
-        .helio-fab span {
-            color: #ffffff;
-            font-size: 1rem;
-            font-weight: 700;
-            letter-spacing: 0.01em;
-            white-space: nowrap;
-        }
-
-        @keyframes helio-pulse {
-            0%, 100% { box-shadow: 0 0 0 6px rgba(0, 119, 255, 0.10), 0 8px 24px rgba(0, 119, 255, 0.45); }
-            50% { box-shadow: 0 0 0 10px rgba(0, 119, 255, 0.16), 0 8px 30px rgba(0, 119, 255, 0.6); }
-        }
-
-        /* =========================================================
-           RESPONSIVE LAYOUT
-           Breakpoints: <1200px (tablet/laptop), <900px (tablet portrait),
-           <640px (mobile). Sidebar collapses to icon rail, telemetry
-           strip and main row stack vertically, everything scrolls.
-        ========================================================= */
-
-        @media (max-width: 1200px) {
-            .telemetry-strip { height: auto; flex-wrap: wrap; }
-            .rover-card { width: 100%; height: 220px; }
-            .telemetry-info-grid { width: 100%; }
-        }
-
-        @media (max-width: 1024px) {
-            body { overflow: auto; height: auto; min-height: 100vh; }
-            .dashboard-content { overflow: visible; }
-            .main-row { flex-direction: column; min-height: unset; }
-            .map-workspace { height: 480px; }
-            .control-panel { width: 100%; max-height: none; }
-        }
-
-        @media (max-width: 900px) {
-            .sidebar { width: 80px; padding: 1.25rem 0.5rem; align-items: center; }
-            .brand-container { justify-content: center; padding-left: 0; }
-            .brand-title, .nav-item span + *, .theme-toggle-label span, .operator-info { display: none; }
-            .brand-title { display: none; }
-            .nav-item { justify-content: center; padding: 0.75rem; }
-            .nav-item span { margin: 0; }
-            .sidebar-footer { justify-content: center; padding: 0.6rem; }
-            .theme-toggle-row { flex-direction: column; gap: 0.4rem; padding: 0.5rem; }
-            .header-bar { padding: 0 1.25rem; }
-            .header-title h2 { font-size: 1rem; }
-            .dashboard-content { padding: 1rem; }
-            .telemetry-info-grid { grid-template-columns: 1fr 1fr; }
-        }
-
-        @media (max-width: 640px) {
-            body { display: block; }
-            .sidebar {
-                width: 100%;
-                height: auto;
-                flex-direction: row;
-                align-items: center;
-                justify-content: space-between;
-                padding: 0.75rem 1rem;
-                border-right: none;
-                border-bottom: 1px solid var(--border-color);
-            }
-            .sidebar-top { flex-direction: row; align-items: center; gap: 1rem; width: 100%; justify-content: space-between; }
-            .brand-container { display: flex; }
-            .brand-title { display: block; }
-            .brand-title h1 { font-size: 0.85rem; }
-            .brand-title p { display: none; }
-            .nav-menu { flex-direction: row; gap: 0.25rem; }
-            .theme-toggle-row { flex-direction: row; margin-top: 0; }
-            .theme-toggle-label span { display: none; }
-            .sidebar-footer { display: none; }
-
-            .main-wrapper { height: auto; }
-            .header-bar { height: auto; padding: 0.75rem 1rem; flex-wrap: wrap; gap: 0.5rem; }
-            .header-title h2 { font-size: 0.95rem; }
-
-            .telemetry-strip { flex-direction: column; }
-            .rover-card { height: 190px; padding: 0.9rem; }
-            .telemetry-info-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
-            .info-card { padding: 0.75rem 0.85rem; }
-            .info-card .card-value { font-size: 1.1rem; }
-
-            .map-workspace { height: 340px; padding: 0.75rem; }
-            .control-panel { padding: 1rem; }
-            .input-group { grid-template-columns: 1fr 1fr; row-gap: 0.5rem; }
-            .btn-row { flex-wrap: wrap; }
-            .btn-row button { min-width: 45%; }
-            .wheel-grid { grid-template-columns: 1fr 1fr; }
-
-            .helio-fab { top: auto; bottom: 1rem; height: 46px; padding: 0 1rem; }
-            .helio-fab span { font-size: 0.85rem; }
-            .helio-fab svg { width: 18px; height: 18px; }
-
-            .modal-assistant-title { font-size: 1.8rem; top: 1.25rem; }
-            .robot-face { width: 260px; height: 150px; padding: 0 20px; }
-            .eye { width: 56px; height: 90px; border-radius: 28px; }
-            .modal-history-column { display: none; }
-            .caption-container { margin-top: 1rem; }
-            .caption-text { font-size: 1.05rem; }
-            .close-modal-btn { top: 1rem; right: 1rem; width: 36px; height: 36px; font-size: 1.2rem; }
-            .speech-bubble { right: -20px; max-width: 200px; font-size: 0.8rem; }
-        }
-
-        @media (max-width: 400px) {
-            .telemetry-info-grid { grid-template-columns: 1fr; }
-            .btn-row button { min-width: 100%; }
-        }
+        #connection-overlay {
+            position: fixed; inset: 0; background: rgba(12, 13, 16, 0.85); z-index: 10000;
+            display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px);
+        }
+        .connection-popup {
+            width: 420px; max-width: 92vw; min-height: 256px; padding: 24px 28px; background: var(--panel); border: 2px solid var(--primary);
+            border-radius: 12px; display: flex; flex-direction: column; align-items: center; 
+            justify-content: center; box-shadow: 0 0 40px rgba(0, 119, 255, 0.2); text-align: center; gap: 10px;
+        }
+        .map-estop-btn {
+            position: absolute; top: 12px; right: 12px; z-index: 50;
+            background: var(--danger); color: #fff; border: 2px solid #fff;
+            padding: 8px 14px; font-size: 0.8rem; font-weight: 800; border-radius: 6px; 
+            cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.4); text-transform: uppercase;
+        }
+        .map-estop-btn:hover { background: #ff1a4a; transform: scale(1.05); }
     </style>
+    <!-- Favicon (same vehicle logo as the sidebar) -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2032%2032%22%3E%3Crect%20width=%2232%22%20height=%2232%22%20rx=%227.5%22%20fill=%22%23007bff%22/%3E%3Cg%20fill=%22%23fff%22%3E%3Crect%20x=%225.15%22%20y=%227%22%20width=%221.2%22%20height=%228%22%20rx=%22.6%22/%3E%3Ccircle%20cx=%225.75%22%20cy=%226.2%22%20r=%221.5%22/%3E%3Cpath%20d=%22M8%2011.5H21.5A5.5%205.5%200%200%201%2027%2017V21A1.5%201.5%200%200%201%2025.5%2022.5H6.5A1.5%201.5%200%200%201%205%2021V14.5A3%203%200%200%201%208%2011.5Z%22/%3E%3Crect%20x=%2223%22%20y=%2214.8%22%20width=%222.6%22%20height=%221.6%22%20rx=%22.5%22%20fill=%22%23007bff%22/%3E%3Ccircle%20cx=%2222.5%22%20cy=%2224%22%20r=%225%22/%3E%3Ccircle%20cx=%229.5%22%20cy=%2224%22%20r=%225%22/%3E%3C/g%3E%3Cg%20fill=%22%23007bff%22%3E%3Ccircle%20cx=%2222.5%22%20cy=%2224%22%20r=%222.3%22/%3E%3Ccircle%20cx=%229.5%22%20cy=%2224%22%20r=%222.3%22/%3E%3C/g%3E%3C/svg%3E">
 </head>
-<body>
+<body class="light-theme">
+    <!-- Disconnection Popup Overlay -->
+    <div id="connection-overlay">
+        <div class="connection-popup">
+            <svg viewBox="0 0 24 24" style="width: 72px; height: 72px; color: var(--primary); position: relative;">
+                <path d="M4 14l2-4h12l2 4v4H4z" fill="currentColor" opacity="0.85" />
+                <rect x="7" y="8" width="10" height="4" rx="1" fill="currentColor" />
+                <circle cx="7" cy="18" r="2.5" fill="#14161a" stroke="currentColor" stroke-width="1.5" />
+                <circle cx="17" cy="18" r="2.5" fill="#14161a" stroke="currentColor" stroke-width="1.5" />
+                <line x1="12" y1="8" x2="15" y2="4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <rect x="-10" y="-15" width="8" height="40" fill="rgba(255,255,255,0.8)" transform="rotate(25)">
+                    <animateTransform attributeName="transform" type="translate" from="-20 -20" to="60 40" dur="1.5s" repeatCount="indefinite"/>
+                </rect>
+            </svg>
+            <h3 style="margin: 0; color: var(--text); font-size: 1.2rem; font-weight: 600;">Connecting to rover...</h3>
+            <p style="margin: 0; color: var(--muted); font-size: 0.85rem;">Establishing ROS bridge</p>
+            <div class="ip-inline">
+                <input id="popup-rover-ip" class="ip-input" type="text" placeholder="Rover IP (e.g. 192.168.1.42)" autocomplete="off" spellcheck="false">
+                <button class="ip-btn" type="button" onclick="submitRoverIp('popup-rover-ip', 'popup-ip-error')">Update &amp; reload</button>
+            </div>
+            <div id="popup-ip-error" class="ip-error"></div>
+        </div>
+    </div>
+
+    <!-- Rover IP dialog (shown when localStorage "rover_ip" is missing) -->
+    <div id="rover-ip-dialog" class="rover-ip-dialog" hidden>
+        <div class="rover-ip-card" role="dialog" aria-modal="true" aria-labelledby="rover-ip-title">
+            <div class="rover-ip-head">
+                <div class="brand-logo" id="rover-ip-logo"></div>
+                <div>
+                    <h3 id="rover-ip-title">Connect to your rover</h3>
+                    <p>Milusions &middot; WareGV Suite</p>
+                </div>
+            </div>
+            <p>Enter the IP address or hostname of the rover. It is saved in this browser, so you only need to do this once.</p>
+            <input id="dialog-rover-ip" class="ip-input" type="text" placeholder="e.g. 192.168.1.42" autocomplete="off" spellcheck="false">
+            <div id="dialog-ip-error" class="ip-error"></div>
+            <button class="ip-btn" type="button" onclick="submitRoverIp('dialog-rover-ip', 'dialog-ip-error')">Connect</button>
+        </div>
+    </div>
 
     <!-- Voice Assistant Modal Overlay -->
     <div id="voice-modal" class="voice-modal">
         <button class="close-modal-btn" onclick="closeVoiceModal()">&times;</button>
         
-        <!-- Really Big Helio Title at the Top -->
         <div class="modal-assistant-title">Helio</div>
 
-        <!-- Centered Robot & Captions -->
         <div class="modal-main-column">
             <div class="robot-face-wrap">
                 <div id="robot-face" class="robot-face listening">
                     <div class="eye"></div>
                     <div class="eye"></div>
                 </div>
+                <div class="zzz" aria-hidden="true"><span>z</span><span>z</span><span>Z</span></div>
+                <div class="think-dots" aria-hidden="true"><span></span><span></span><span></span></div>
                 <div id="speech-bubble" class="speech-bubble">Hello! How can I help?</div>
             </div>
 
+            <div class="user-input-wrap">
+                <label for="user-input">User input</label>
+                <div style="display: flex; gap: 8px;">
+                    <input id="user-input" type="text" placeholder="Optional text sent with every prompt" autocomplete="off" style="flex: 1;">
+                    <button id="manual-send-btn" class="manual-send-btn" type="button" onclick="sendManualText()" style="margin-top: 0; min-width: 100px;">
+                        SEND
+                    </button>
+                </div>
+            </div>
+
+            <div id="thinking-panel" class="thinking-panel" aria-live="polite">
+                <span class="thinking-spinner" aria-hidden="true"></span>
+                <span id="thinking-stage-text">Analyzing prompt</span>
+            </div>
+
             <div class="caption-container">
-                <div id="caption-status" class="caption-status">Listening</div>
-                <div id="caption-text" class="caption-text">Speak now...</div>
+                <div class="caption-header-row">
+                    <div id="caption-status" class="caption-status">Listening</div>
+                    <button id="stop-talking-btn" class="stop-talking-btn" onclick="stopTalking()" title="Stop announcer">Stop Talking</button>
+                </div>
+                <div id="caption-text" class="caption-text md-viewer">Speak now...</div>
             </div>
         </div>
 
-        <!-- Session History Panel Pinned to the Right -->
         <div class="modal-history-column">
             <div class="history-header">Session History</div>
-            <div id="history-list" class="history-list">
-                <!-- History entries populated dynamically -->
-            </div>
+            <div id="history-list" class="history-list"></div>
         </div>
     </div>
 
-    <!-- Helio: single centered floating sparkle trigger -->
-    <button class="helio-fab" onclick="openVoiceModal()" title="Ask Helio">
-        <svg viewBox="0 0 24 24">
-            <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z"/>
-            <path d="M19 15l0.9 2.1L22 18l-2.1 0.9L19 21l-0.9-2.1L16 18l2.1-0.9L19 15z" opacity="0.7"/>
-            <path d="M5 14l0.7 1.6L7.3 16.3 5.7 17 5 18.6 4.3 17l-1.6-0.7L4.3 15.6 5 14z" opacity="0.7"/>
-        </svg>
-        <span>Ask Helio</span>
-    </button>
+    <!-- Helio Peeking FAB Container at Bottom Right -->
+    <div class="helio-fab-wrap">
+        <div id="helio-peek" class="helio-peek-container">
+            <div class="peek-robot-head">
+                <div class="peek-eye"></div>
+                <div class="peek-eye"></div>
+            </div>
+            <div id="peek-bubble" class="peek-speech-bubble">Check me out!</div>
+        </div>
+        <button class="helio-fab" onclick="openVoiceModal()" title="Ask Helio">
+            <svg viewBox="0 0 24 24">
+                <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z"/>
+                <path d="M19 15l0.9 2.1L22 18l-2.1 0.9L19 21l-0.9-2.1L16 18l2.1-0.9L19 15z" opacity="0.7"/>
+                <path d="M5 14l0.7 1.6L7.3 16.3 5.7 17 5 18.6 4.3 17l-1.6-0.7L4.3 15.6 5 14z" opacity="0.7"/>
+            </svg>
+            <span>Ask Helio</span>
+        </button>
+    </div>
 
     <!-- Side Navigation -->
     <aside class="sidebar">
         <div class="sidebar-top">
             <div class="brand-container">
                 <div class="brand-logo">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M19 12h-2V8h-2V6H9v2H7v4H5c-1.1 0-2 .9-2 2v6h2v2h2v-2h10v2h2v-6c0-1.1-.9-2-2-2zM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V10h12v1z"/>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%">
+                        <!-- Background -->
+                        <rect width="32" height="32" rx="7.5" fill="#007bff"/>
+                        <!-- Rescaled and Centered Vehicle Group -->
+                        <g fill="#ffffff">
+                            <!-- Antenna Mast -->
+                            <rect x="5.15" y="7.0" width="1.2" height="8.0" rx="0.6"/>
+                            <!-- Antenna Tip -->
+                            <circle cx="5.75" cy="6.2" r="1.5"/>
+                            <!-- Main Chassis -->
+                            <path d="M 8.0 11.5 L 21.5 11.5 A 5.5 5.5 0 0 1 27.0 17.0 L 27.0 21.0 A 1.5 1.5 0 0 1 25.5 22.5 L 6.5 22.5 A 1.5 1.5 0 0 1 5.0 21.0 L 5.0 14.5 A 3.0 3.0 0 0 1 8.0 11.5 Z"/>
+                            <!-- Window/Cutout -->
+                            <rect x="23.0" y="14.8" width="2.6" height="1.6" rx="0.5" fill="#007bff"/>
+                            <!-- Front Wheel (Right) -->
+                            <circle cx="22.5" cy="24.0" r="5.0"/>
+                            <!-- Rear Wheel (Left) -->
+                            <circle cx="9.5" cy="24.0" r="5.0"/>
+                        </g>
+                        <!-- Wheel Cutouts -->
+                        <g fill="#007bff">
+                            <circle cx="22.5" cy="24.0" r="2.3"/>
+                            <circle cx="9.5" cy="24.0" r="2.3"/>
+                        </g>
                     </svg>
                 </div>
                 <div class="brand-title">
@@ -1153,970 +177,306 @@
                     <p>WareGV Suite</p>
                 </div>
             </div>
-
             <nav class="nav-menu">
                 <a class="nav-item active">
-                    <span>&#9632;</span> Control Center
-                </a>
-                <a class="nav-item" onclick="setClickMode('waypoint')">
-                    <span>&#9679;</span> Waypoint Manager
+                    <svg viewBox="0 0 24 24"><path d="M3 3h8v10H3V3zm10 0h8v6h-8V3zM3 15h8v6H3v-6zm10-4h8v10h-8V11z"/></svg>
+                    <span class="lbl">Dashboard</span>
                 </a>
             </nav>
-
-            <div class="theme-toggle-row">
-                <div class="theme-toggle-label">
-                    <svg id="theme-icon-moon" viewBox="0 0 24 24" width="15" height="15"><path d="M12.3 3a9 9 0 1 0 8.7 11.4c.2-.6-.5-1.1-1-.8a6.5 6.5 0 0 1-8.6-8.6c.3-.5-.2-1.2-.8-1z"/></svg>
-                    <span>Theme</span>
-                </div>
-                <button id="theme-switch" class="theme-switch" onclick="toggleTheme()" role="switch" aria-checked="false" title="Toggle light / dark theme">
-                    <span class="theme-switch-knob"></span>
-                </button>
-            </div>
-        </div>
-
-        <div class="sidebar-footer">
-            <div class="operator-info">
-                <h4>System Node</h4>
-                <p>Online & Ready</p>
-            </div>
-            <div style="width: 8px; height: 8px; background: var(--success); border-radius: 50%;"></div>
         </div>
     </aside>
 
-    <!-- Main Workspace Wrapper -->
     <div class="main-wrapper">
-        <!-- Top Header Bar -->
         <header class="header-bar">
-            <div class="header-title">
-                <h2>Autonomous Navigation Dashboard</h2>
-            </div>
+            <div class="header-title"><h2>Autonomous Navigation Dashboard</h2></div>
             <div class="header-actions">
                 <span id="ros-status" class="status-badge">Disconnected</span>
+                <div class="wake-menu-wrap">
+                    <button id="wake-btn" class="icon-btn wake-btn on" onclick="toggleWakeMenu(event)" aria-haspopup="menu" aria-expanded="false" title="Wake word settings">
+                        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+                        <span id="wake-label" class="wake-label">rover</span>
+                        <svg class="caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </button>
+                    <div id="wake-menu" class="wake-menu" role="menu" hidden></div>
+                </div>
+                <button id="theme-btn" class="icon-btn" onclick="toggleTheme()" title="Toggle light / dark theme" aria-label="Toggle theme">
+                    <svg class="ico-moon" viewBox="0 0 24 24"><path d="M12.3 3a9 9 0 1 0 8.7 11.4c.2-.6-.5-1.1-1-.8a6.5 6.5 0 0 1-8.6-8.6c.3-.5-.2-1.2-.8-1 z"/></svg>
+                    <svg class="ico-sun" viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12 1l1.5 3h-3L12 1zm0 22l-1.5-3h3L12 23zM1 12l3-1.5v3L1 12zm22 0l-3 1.5v-3L23 12zM4.2 4.2l3.2 1-2.2 2.2-1-3.2zm15.6 15.6l-3.2-1 2.2-2.2 1 3.2zM4.2 19.8l1-3.2 2.2 2.2-3.2 1zM19.8 4.2l-1 3.2-2.2-2.2 3.2-1z"/></svg>
+                </button>
             </div>
         </header>
 
-        <!-- Dashboard Content Grid -->
-        <main class="dashboard-content">
-
-            <!-- Telemetry Strip: Rover render + live stats -->
-            <section class="telemetry-strip">
-                <div class="rover-card">
-                    <div class="rover-visual">
-                        <svg viewBox="0 0 240 140" xmlns="http://www.w3.org/2000/svg">
-                            <ellipse cx="120" cy="118" rx="90" ry="10" fill="#0077ff" opacity="0.12"/>
-                            <rect x="18" y="70" width="204" height="34" rx="12" fill="#171c27" stroke="#232936" stroke-width="1"/>
-                            <rect x="55" y="42" width="130" height="36" rx="10" fill="#1c2330" stroke="#0077ff" stroke-width="1.5"/>
-                            <rect x="65" y="48" width="45" height="22" rx="4" fill="#0077ff" opacity="0.55"/>
-                            <rect x="130" y="48" width="45" height="22" rx="4" fill="#0077ff" opacity="0.3"/>
-                            <circle cx="55" cy="106" r="17" fill="#05070c" stroke="#0077ff" stroke-width="3"/>
-                            <circle cx="185" cy="106" r="17" fill="#05070c" stroke="#0077ff" stroke-width="3"/>
-                            <circle cx="55" cy="106" r="5" fill="#0077ff"/>
-                            <circle cx="185" cy="106" r="5" fill="#0077ff"/>
-                            <rect x="95" y="30" width="10" height="14" rx="2" fill="#009D5B"/>
-                            <circle cx="100" cy="26" r="4" fill="#009D5B">
-                                <animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite"/>
-                            </circle>
-                        </svg>
+        <main class="workspace">
+            <!-- SLAM Map -->
+            <section class="panel p-map">
+                <div class="panel-hd">
+                    <span>SLAM Map <span class="sub" id="map-meta"></span></span>
+                    <div class="panel-tools">
+                        <button class="tool-btn" onclick="fitMapView()" title="Fit map to panel">Fit</button>
+                        <button class="tool-btn" id="follow-btn" onclick="toggleFollow()" title="Keep the rover centred">Follow</button>
+                        <button class="tool-btn" onclick="clearMarkers()" title="Remove target and waypoint markers">Clear</button>
                     </div>
-                    <div class="rover-speed-row">
-                        <div>
-                            <div class="label">Speed</div>
-                            <div class="value" id="stat-speed">0.0<span>km/h</span></div>
+                </div>
+                <div class="panel-body">
+                    <div class="map-container" id="map-wrapper">
+                        <div id="map-nav-card" class="map-nav-card">
+                            <div class="map-nav-card-hd">
+                                <span>Navigation</span>
+                                <button class="tool-btn" id="nav-card-toggle" type="button" onclick="toggleNavCard()" title="Collapse / expand">Hide</button>
+                            </div>
+                            <div class="map-nav-card-body">
+                                <div>
+                                    <div class="sec-title">Navigation Mode</div>
+                                    <div class="segmented">
+                                        <label><input type="radio" name="click_mode" value="single" checked onchange="setClickMode('single')"><span>Single Target</span></label>
+                                        <label><input type="radio" name="click_mode" value="waypoint" onchange="setClickMode('waypoint')"><span>Waypoints</span></label>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div class="sec-title">Target Coordinates</div>
+                                    <div class="coords-box">
+                                        X: <span id="lbl-x">0.00</span> | Y: <span id="lbl-y">0.00</span> | Yaw: <span id="lbl-yaw">0.00</span>&deg;
+                                        <div id="waypoints-container" class="waypoints-list" style="display:none;"></div>
+                                    </div>
+                                </div>
+
+                                <div class="input-group">
+                                    <div><label>X Target</label><input type="number" class="field" id="target-x" step="0.1" value="0.0" onchange="updateSingleFromInputs()"></div>
+                                    <div><label>Y Target</label><input type="number" class="field" id="target-y" step="0.1" value="0.0" onchange="updateSingleFromInputs()"></div>
+                                    <div><label>Yaw (deg)</label><input type="number" class="field" id="target-yaw" step="1" value="0" onchange="updateSingleFromInputs()"></div>
+                                </div>
+
+                                <div class="btn-row" id="single-actions">
+                                    <button class="btn btn-primary" id="nav-pose-btn" onclick="runNavButton(this, sendGoalPose)">Navigate to Pose</button>
+                                    <button class="btn btn-secondary" onclick="run(this, sendInitialPose)">Set Initial</button>
+                                </div>
+                                <div class="btn-row" id="waypoint-actions" style="display:none;">
+                                    <button class="btn btn-success" id="follow-wp-btn" onclick="runNavButton(this, sendWaypoints)">Follow Waypoints</button>
+                                </div>
+
+                                <hr class="divider">
+                                <div class="btn-row"><button class="btn btn-danger" onclick="run(this, sendAbort)">ABORT MISSION</button></div>
+                            </div>
                         </div>
-                        <div class="rpm-ring-wrap">
-                            <svg viewBox="0 0 74 74">
-                                <circle class="rpm-ring-bg" cx="37" cy="37" r="30"></circle>
-                                <circle class="rpm-ring-fg" id="rpm-ring" cx="37" cy="37" r="30" stroke-dasharray="188.5" stroke-dashoffset="188.5"></circle>
-                            </svg>
-                            <div class="rpm-ring-text">
-                                <b id="stat-rpm">0</b>
-                                <small>RPM</small>
+
+                        <canvas id="map-canvas"></canvas>
+                        <div class="map-empty" id="map-empty">Waiting for /map…</div>
+                        <div class="map-overlay mono" id="map-cursor">x —  y —</div>
+                        <div class="map-overlay right mono" id="map-grid-label">Grid 1 m</div>
+
+                        <div id="map-pose-popup" class="map-pose-popup" role="dialog" aria-label="Map pose actions" 
+                             onpointerdown="event.stopPropagation()" 
+                             onpointerup="event.stopPropagation()" 
+                             onclick="event.stopPropagation()">
+                            <button class="map-pose-popup-close" type="button" onclick="closePoseActionPopup()" aria-label="Close">&times;</button>
+                            <div class="map-pose-popup-title">Pose selected</div>
+                            <div id="map-pose-popup-pose" class="map-pose-popup-pose">X 0.00 | Y 0.00 | Yaw 0.0°</div>
+                            <button type="button" class="primary-action" onclick="popupNavigateToPoint()">Navigate to point</button>
+                            <button type="button" onclick="popupSetInitialCheckpoint()">Set initial checkpoint</button>
+                            <button type="button" onclick="popupAddWaypoint()">Add to waypoints</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Mission Control -->
+            <div class="col-ctrl">
+            <section class="panel cam-panel">
+                <div class="panel-hd"><span>Camera <span class="sub" id="cam-meta">/camera/image_raw</span></span></div>
+                <div class="cam-body">
+                    <canvas id="cam-canvas" width="4" height="3"></canvas>
+                    <div class="map-empty" id="cam-empty">Waiting for /camera/image_raw…</div>
+                </div>
+            </section>
+            <aside class="panel ctrl-panel">
+                <div class="panel-hd"><span>Mission Control</span></div>
+                <div class="panel-body scroll">
+                    <div class="ctrl-body">
+                        <div>
+                            <div class="sec-title">System Mode</div>
+                            <div class="stack">
+                                <select id="sys-mode-select" class="field" onchange="modeSelectTouched = true">
+                                    <option value="slam">SLAM Only (Mapping)</option>
+                                    <option value="slam_nav">SLAM + Navigation</option>
+                                    <option value="slam_update">SLAM Update + Navigation</option>
+                                    <option value="manual">Manual (Joystick)</option>
+                                </select>
+                                <label style="display:block; font-size:0.66rem; font-weight:600; color:var(--muted); margin-bottom:3px; margin-top:6px;">Map Name</label>
+                                <input type="text" id="map-name-input" class="field" placeholder="Map name (e.g. warehouse)" value="small_warehouse">
+                                <div class="btn-row">
+                                    <button class="btn btn-primary" id="deploy-btn" onclick="applySystemMode()">Deploy Mode</button>
+                                    <button class="btn btn-success" onclick="run(this, saveCurrentMap)">Save Map</button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                <div class="telemetry-info-grid">
-                    <div class="info-card">
-                        <div class="info-card-top">
-                            <span class="card-label">Location</span>
-                            <span class="icon-badge">
-                                <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
-                            </span>
-                        </div>
-                        <div class="card-sub" id="stat-location">X: 0.00&nbsp;&nbsp;Y: 0.00&nbsp;&nbsp;Yaw: 0.0&deg;</div>
-                    </div>
-
-                    <div class="info-card accent-green">
-                        <div class="info-card-top">
-                            <span class="card-label">Battery</span>
-                            <span class="icon-badge">
-                                <svg viewBox="0 0 24 24"><path d="M16.67 4H15V2h-6v2H7.33C6.6 4 6 4.6 6 5.33v15.33C6 21.4 6.6 22 7.33 22h9.33c.74 0 1.34-.6 1.34-1.33V5.33C18 4.6 17.4 4 16.67 4z"/></svg>
-                            </span>
-                        </div>
-                        <div>
-                            <div class="card-value"><span id="stat-battery">87</span><span>%</span></div>
-                            <div class="battery-track"><div class="battery-fill" id="battery-fill" style="width:87%"></div></div>
-                        </div>
-                    </div>
-
-                    <div class="info-card">
-                        <div class="info-card-top">
-                            <span class="card-label">System Node</span>
-                            <span class="icon-badge">
-                                <svg viewBox="0 0 24 24"><path d="M19 12h-2V8h-2V6H9v2H7v4H5c-1.1 0-2 .9-2 2v6h2v2h2v-2h10v2h2v-6c0-1.1-.9-2-2-2zM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V10h12v1z"/></svg>
-                            </span>
-                        </div>
-                        <div class="card-value" style="font-size:1.05rem;" id="stat-node">Standby</div>
-                    </div>
-
-                    <div class="info-card accent-red">
-                        <div class="info-card-top">
-                            <span class="card-label">Mission Mode</span>
-                            <span class="icon-badge">
-                                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                            </span>
-                        </div>
-                        <div class="card-value" style="font-size:1.05rem;" id="stat-mode">Single Target</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Map + Control Row -->
-            <div class="main-row">
-            <!-- Map Workspace -->
-            <section class="map-workspace">
-                <div class="panel-section-title" style="margin-bottom: 0.5rem;">Live SLAM Occupancy Map</div>
-                <div class="map-container" id="map-wrapper">
-                    <div id="map"></div>
-                </div>
-            </section>
-
-            <!-- Control Panel Workspace -->
-            <aside class="control-panel">
-                <div>
-                    <div class="panel-section-title">Navigation Mode</div>
-                    <div class="mode-toggle" style="margin-top: 0.4rem;">
-                        <label>
-                            <input type="radio" name="click_mode" value="single" checked onchange="setClickMode('single')"> 
-                            Single Target
-                        </label>
-                        <label>
-                            <input type="radio" name="click_mode" value="waypoint" onchange="setClickMode('waypoint')"> 
-                            Waypoints Mode
-                        </label>
-                    </div>
-                </div>
-
-                <div>
-                    <div class="panel-section-title">Target Coordinates</div>
-                    <div class="coords-box" style="margin-top: 0.4rem;">
-                        X: <span id="lbl-x">0.00</span> | Y: <span id="lbl-y">0.00</span> | Yaw: <span id="lbl-yaw">0.00</span>&deg;
-                        <div id="waypoints-container" class="waypoints-list" style="display: none;"></div>
-                    </div>
-                </div>
-
-                <div class="input-group">
-                    <div>
-                        <label>X Target</label>
-                        <input type="number" id="target-x" step="0.1" value="0.0" onchange="updateSingleFromInputs()">
-                    </div>
-                    <div>
-                        <label>Y Target</label>
-                        <input type="number" id="target-y" step="0.1" value="0.0" onchange="updateSingleFromInputs()">
-                    </div>
-                    <div>
-                        <label>Yaw (deg)</label>
-                        <input type="number" id="target-yaw" step="1" value="0" onchange="updateSingleFromInputs()">
-                    </div>
-                </div>
-
-                <!-- Action Controls -->
-                <div class="btn-row" id="single-actions">
-                    <button class="btn-primary" onclick="sendGoalPose()">Navigate to Pose</button>
-                    <button class="btn-secondary" onclick="sendInitialPose()">Set Initial</button>
-                </div>
-
-                <div class="btn-row" id="waypoint-actions" style="display: none;">
-                    <button class="btn-success" onclick="sendWaypoints()">Follow Waypoints</button>
-                </div>
-
-                <hr class="divider">
-
-                <div>
-                    <div class="panel-section-title">Wheel Velocity Control</div>
-                    <div class="wheel-grid">
-                        <div class="wheel-slider-card">
-                            <label for="wheel-fl">FL <span class="wheel-tag">Front-Left</span></label>
-                            <input type="range" id="wheel-fl" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('fl')">
-                            <span class="wheel-val" id="wheel-fl-val">0.00</span>
-                        </div>
-                        <div class="wheel-slider-card">
-                            <label for="wheel-fr">FR <span class="wheel-tag">Front-Right</span></label>
-                            <input type="range" id="wheel-fr" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('fr')">
-                            <span class="wheel-val" id="wheel-fr-val">0.00</span>
-                        </div>
-                        <div class="wheel-slider-card">
-                            <label for="wheel-bl">BL <span class="wheel-tag">Back-Left</span></label>
-                            <input type="range" id="wheel-bl" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('bl')">
-                            <span class="wheel-val" id="wheel-bl-val">0.00</span>
-                        </div>
-                        <div class="wheel-slider-card">
-                            <label for="wheel-br">BR <span class="wheel-tag">Back-Right</span></label>
-                            <input type="range" id="wheel-br" min="-1" max="1" step="0.01" value="0" oninput="onWheelSliderInput('br')">
-                            <span class="wheel-val" id="wheel-br-val">0.00</span>
-                        </div>
-                    </div>
-                    <div class="btn-row" style="margin-top: 0.6rem;">
-                        <button class="btn-secondary" onclick="nudgeAllWheels(0.5)">All Fwd 0.5</button>
-                        <button class="btn-danger" onclick="stopAllWheels()">Stop All</button>
-                    </div>
-                    <div class="wheel-hint">Publishes <code>[fr, br, fl, bl]</code> to <code>/velocity_commands/commands</code> as a Float32MultiArray, live as you drag.</div>
-                </div>
-
-                <hr class="divider">
-
-                <div class="btn-row">
-                    <button class="btn-secondary" onclick="clearMarkers()">Clear Canvas</button>
-                    <button class="btn-danger" onclick="sendAbort()">ABORT MISSION</button>
-                </div>
             </aside>
+            </div>
+
+            <!-- Status + Joystick -->
+            <div class="side">
+                <section class="panel">
+                    <div class="panel-hd"><span>Status</span></div>
+                    <div>
+                        <div class="kv"><span class="k">Mode</span>
+                            <span class="v"><span class="mode-chip" id="mode-chip"><span class="mode-dot"></span><span id="stat-mode">Unknown</span></span></span></div>
+                        <div class="kv"><span class="k">Nav Status</span>
+                            <span class="v" id="stat-nav-status">Idle</span></div>
+                        <div class="kv"><span class="k">Distance</span>
+                            <span class="v mono"><span id="stat-distance">—</span><span class="u">m</span></span></div>
+                        <div class="kv"><span class="k">Speed</span>
+                            <span class="v mono"><span id="stat-speed">0.00</span><span class="u">m/s</span></span></div>
+                        <div class="kv"><span class="k">Heading</span>
+                            <span class="v mono">
+                                <svg id="hdg-arrow" viewBox="0 0 24 24"><path d="M12 2l6 18-6-4-6 4z"/></svg>
+                                <span id="stat-heading">—</span><span class="u">&deg;</span></span></div>
+                        <div class="kv"><span class="k">Location</span>
+                            <span class="v mono" id="stat-location">X — &nbsp; Y —</span></div>
+                    </div>
+                </section>
+
+                <section class="panel" style="flex:1;">
+                    <div class="panel-hd"><span>Joystick</span><span class="sub mono">/joy</span></div>
+                    <div class="panel-body">
+                        <div class="joy-wrap">
+                            <div class="joy-pad" id="joy-pad"><div class="joy-knob" id="joy-knob"></div></div>
+                            <div class="joy-read mono">
+                                <span>fwd <b id="joy-y">0.00</b></span>
+                                <span>turn <b id="joy-x">0.00</b></span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Wheel graphs -->
+            <div class="graphs">
+                <section class="panel"><div class="panel-hd"><span>Front Left Wheel <span class="mono" style="font-size:0.62rem;color:var(--muted)">(signed)</span></span>
+                    <div class="chart-legend mono"><span class="a"><i></i>actual<b id="lg-fl-a">—</b></span><span class="b"><i></i>cmd<b id="lg-fl-c">—</b></span></div></div>
+                    <div class="panel-body"><canvas class="chart-canvas" id="chart-fl"></canvas></div></section>
+                <section class="panel"><div class="panel-hd"><span>Front Right Wheel <span class="mono" style="font-size:0.62rem;color:var(--muted)">(signed)</span></span>
+                    <div class="chart-legend mono"><span class="a"><i></i>actual<b id="lg-fr-a">—</b></span><span class="b"><i></i>cmd<b id="lg-fr-c">—</b></span></div></div>
+                    <div class="panel-body"><canvas class="chart-canvas" id="chart-fr"></canvas></div></section>
+                <section class="panel"><div class="panel-hd"><span>Rear Left Wheel <span class="mono" style="font-size:0.62rem;color:var(--muted)">(signed)</span></span>
+                    <div class="chart-legend mono"><span class="a"><i></i>actual<b id="lg-bl-a">—</b></span><span class="b"><i></i>cmd<b id="lg-bl-c">—</b></span></div></div>
+                    <div class="panel-body"><canvas class="chart-canvas" id="chart-bl"></canvas></div></section>
+                <section class="panel"><div class="panel-hd"><span>Rear Right Wheel <span class="mono" style="font-size:0.62rem;color:var(--muted)">(signed)</span></span>
+                    <div class="chart-legend mono"><span class="a"><i></i>actual<b id="lg-br-a">—</b></span><span class="b"><i></i>cmd<b id="lg-br-c">—</b></span></div></div>
+                    <div class="panel-body"><canvas class="chart-canvas" id="chart-br"></canvas></div></section>
             </div>
         </main>
     </div>
 
+    <div id="notify-stack"></div>
+
+    <script src="app.js"></script>
     <script>
-        // ---- Theme Toggle (light / dark) ----
-        function applyTheme(isLight) {
-            document.body.classList.toggle('light-theme', isLight);
-            const sw = document.getElementById('theme-switch');
-            if (sw) sw.setAttribute('aria-checked', isLight ? 'true' : 'false');
-        }
+        window.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                const overlay = document.getElementById('connection-overlay');
+                if (ros && ros.isConnected) {
+                    if (overlay) overlay.style.display = 'none';
+                    const statusEl = document.getElementById('ros-status');
+                    if (statusEl) {
+                        statusEl.textContent = 'ROS Connected';
+                        statusEl.classList.add('connected');
+                    }
+                }
+            }, 300);
+        });
 
-        function toggleTheme() {
-            const isLight = !document.body.classList.contains('light-theme');
-            applyTheme(isLight);
-            try { localStorage.setItem('milusions-theme', isLight ? 'light' : 'dark'); } catch (e) {}
-        }
-
-        (function initTheme() {
-            let saved = null;
-            try { saved = localStorage.getItem('milusions-theme'); } catch (e) {}
-            applyTheme(saved === 'light');
+        // --- Navigation card on the map: keep its clicks/drags/scrolls away from the map handlers ---
+        (function () {
+            const card = document.getElementById('map-nav-card');
+            if (!card) return;
+            ['pointerup', 'pointermove', 'pointercancel', 'wheel', 'contextmenu'].forEach(t =>
+                card.addEventListener(t, e => e.stopPropagation()));
+            card.addEventListener('pointerdown', e => {
+                e.stopPropagation();
+                if (typeof closePoseActionPopup === 'function') closePoseActionPopup();
+            });
         })();
 
-        // ---- ROS Connection & Mapping Logic ----
-        const ros = new ROSLIB.Ros({
-            url: 'ws://' + window.location.hostname + ':9090'
+        function toggleNavCard() {
+            const card = document.getElementById('map-nav-card');
+            const btn = document.getElementById('nav-card-toggle');
+            const collapsed = card.classList.toggle('collapsed');
+            btn.textContent = collapsed ? 'Show' : 'Hide';
+        }
+
+        // --- Helio Peeking Animation Logic (drops down from the top-centre button) ---
+        const PEEK_MESSAGES = [
+            "Ever wondered if you could control a rover hands free?",
+            "Hey there how are you?",
+            "Controlling a rover i see!",
+            "Hey, whats this button!"
+        ];
+
+        function triggerHelioPeek() {
+            const peekContainer = document.getElementById('helio-peek');
+            const peekBubble = document.getElementById('peek-bubble');
+            if (!peekContainer || !peekBubble) return;
+
+            if (typeof modal !== 'undefined' && modal.classList.contains('active')) return;
+
+            const randomMsg = PEEK_MESSAGES[Math.floor(Math.random() * PEEK_MESSAGES.length)];
+            peekBubble.textContent = randomMsg;
+
+            peekContainer.classList.add('peeking');
+            peekBubble.classList.add('show');
+
+            setTimeout(() => {
+                peekBubble.textContent = "Check me out!";
+                peekContainer.classList.remove('peeking');
+
+                setTimeout(() => {
+                    peekBubble.classList.remove('show');
+                }, 800);
+
+            }, 3500);
+        }
+
+        setInterval(triggerHelioPeek, 6000);
+        setTimeout(triggerHelioPeek, 1500);
+
+        // --- Centre the Ask Helio button horizontally on the map panel ---
+        function centerHelioOnMap() {
+            const map = document.querySelector('.p-map'), wrap = document.querySelector('.helio-fab-wrap');
+            if (!map || !wrap) return;
+            const r = map.getBoundingClientRect();
+            wrap.style.left = (r.left + r.width / 2) + 'px';
+        }
+        window.addEventListener('resize', centerHelioOnMap);
+        window.addEventListener('load', centerHelioOnMap);
+        if (window.ResizeObserver) new ResizeObserver(centerHelioOnMap).observe(document.querySelector('.p-map'));
+        centerHelioOnMap();
+
+        // --- Rover IP (localStorage "rover_ip") ---
+        function submitRoverIp(inputId, errId) {
+            const input = document.getElementById(inputId), err = document.getElementById(errId);
+            const ip = normalizeRoverIp(input.value);
+            if (!isValidRoverHost(ip)) { err.textContent = 'Enter a valid IP address or hostname.'; input.focus(); return; }
+            saveRoverIpAndReload(ip);
+        }
+        ['popup-rover-ip', 'dialog-rover-ip'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const errId = id === 'popup-rover-ip' ? 'popup-ip-error' : 'dialog-ip-error';
+            el.addEventListener('keydown', e => { if (e.key === 'Enter') submitRoverIp(id, errId); });
+            el.addEventListener('input', () => { document.getElementById(errId).textContent = ''; });
         });
-
-        const statusEl = document.getElementById('ros-status');
-
-        ros.on('connection', () => {
-            statusEl.textContent = 'ROS Connected';
-            statusEl.classList.add('connected');
-            const nodeEl = document.getElementById('stat-node');
-            if (nodeEl) nodeEl.textContent = 'Online';
-            initMap();
-        });
-        ros.on('error', (error) => {
-            statusEl.textContent = 'Connection Error';
-            statusEl.classList.remove('connected');
-            const nodeEl = document.getElementById('stat-node');
-            if (nodeEl) nodeEl.textContent = 'Error';
-        });
-        ros.on('close', () => {
-            statusEl.textContent = 'Disconnected';
-            statusEl.classList.remove('connected');
-            const nodeEl = document.getElementById('stat-node');
-            if (nodeEl) nodeEl.textContent = 'Standby';
-        });
-
-        // ---- Wheel Velocity Control (/velocity_commands/commands) ----
-        // Publishes a Float32MultiArray: [fr, br, fl, bl]
-        const velocityTopic = new ROSLIB.Topic({
-            ros: ros,
-            name: '/velocity_commands/commands',
-            messageType: 'std_msgs/Float32MultiArray'
-        });
-
-        const wheelIds = ['fr', 'br', 'fl', 'bl'];
-        let velocityPublishTimer = null;
-
-        function getWheelValues() {
-            return wheelIds.map(id => parseFloat(document.getElementById('wheel-' + id).value) || 0);
-        }
-
-        function publishWheelVelocities() {
-            const values = getWheelValues();
-            try {
-                velocityTopic.publish(new ROSLIB.Message({ data: values }));
-            } catch (e) {
-                showToast(CONNECTION_ERROR_MSG);
+        (function () {
+            const popupInput = document.getElementById('popup-rover-ip');
+            if (popupInput && ROVER_IP) popupInput.value = ROVER_IP;
+            if (!ROVER_IP) {
+                const logo = document.getElementById('rover-ip-logo'), src = document.querySelector('.sidebar .brand-logo');
+                if (logo && src) logo.innerHTML = src.innerHTML;
+                document.getElementById('rover-ip-dialog').hidden = false;
+                setTimeout(() => document.getElementById('dialog-rover-ip').focus(), 50);
             }
-        }
-
-        function onWheelSliderInput(id) {
-            const val = parseFloat(document.getElementById('wheel-' + id).value);
-            document.getElementById('wheel-' + id + '-val').textContent = val.toFixed(2);
-            publishWheelVelocities();
-        }
-
-        function stopAllWheels() {
-            wheelIds.forEach(id => {
-                document.getElementById('wheel-' + id).value = 0;
-                document.getElementById('wheel-' + id + '-val').textContent = '0.00';
-            });
-            publishWheelVelocities();
-        }
-
-        function nudgeAllWheels(value) {
-            wheelIds.forEach(id => {
-                document.getElementById('wheel-' + id).value = value;
-                document.getElementById('wheel-' + id + '-val').textContent = value.toFixed(2);
-            });
-            publishWheelVelocities();
-        }
-
-        let viewer, gridClient;
-        const ROTATE_CLOCKWISE = false;
-        let clickMode = 'single';
-        let isDragging = false;
-        let dragStartRos = null;
-        let activeArrow = null;
-        let singleArrowMarker = null;
-        let waypointMarkers = [];
-        let waypointsData = [];
-
-        function setClickMode(mode) {
-            clickMode = mode;
-            document.getElementById('single-actions').style.display = mode === 'single' ? 'flex' : 'none';
-            document.getElementById('waypoint-actions').style.display = mode === 'waypoint' ? 'flex' : 'none';
-            document.getElementById('waypoints-container').style.display = mode === 'waypoint' ? 'block' : 'none';
-            const modeEl = document.getElementById('stat-mode');
-            if (modeEl) modeEl.textContent = mode === 'single' ? 'Single Target' : 'Waypoints';
-        }
-
-        // ---- Telemetry Strip Simulation (speed / rpm / battery / location) ----
-        const RPM_MAX = 3000;
-        function setRpmRing(pct) {
-            const ring = document.getElementById('rpm-ring');
-            if (!ring) return;
-            const circumference = 188.5;
-            ring.style.strokeDashoffset = circumference - (circumference * Math.min(Math.max(pct, 0), 1));
-        }
-
-        function updateTelemetryLocation(x, y, yaw) {
-            const el = document.getElementById('stat-location');
-            if (el) el.textContent = `X: ${x.toFixed(2)}  Y: ${y.toFixed(2)}  Yaw: ${yaw.toFixed(1)}°`;
-        }
-
-        let simSpeed = 0, simBattery = 87;
-        setInterval(() => {
-            // Idle drift simulation so the dashboard feels alive; replace with real /odom + /battery topics when available.
-            const moving = isDragging || (viewer && singleArrowMarker);
-            const targetSpeed = moving ? (2 + Math.random() * 4) : (Math.random() * 0.4);
-            simSpeed += (targetSpeed - simSpeed) * 0.25;
-            const rpm = Math.round((simSpeed / 6) * RPM_MAX);
-
-            const speedEl = document.getElementById('stat-speed');
-            const rpmEl = document.getElementById('stat-rpm');
-            if (speedEl) speedEl.innerHTML = simSpeed.toFixed(1) + '<span>km/h</span>';
-            if (rpmEl) rpmEl.textContent = rpm;
-            setRpmRing(rpm / RPM_MAX);
-
-            simBattery = Math.max(0, simBattery - 0.002);
-            const battEl = document.getElementById('stat-battery');
-            const battFill = document.getElementById('battery-fill');
-            if (battEl) battEl.textContent = simBattery.toFixed(0);
-            if (battFill) battFill.style.width = simBattery + '%';
-        }, 900);
-
-        function getRosCoordsFromEvent(evt, container) {
-            const rect = container.getBoundingClientRect();
-            const rx = evt.clientX - rect.left;
-            const ry = evt.clientY - rect.top;
-            const visualW = rect.width;
-            const visualH = rect.height;
-
-            let localX, localY;
-            if (ROTATE_CLOCKWISE) {
-                localX = ry;
-                localY = visualW - rx;
-            } else {
-                localX = visualH - ry;
-                localY = rx;
-            }
-            const rosPos = viewer.scene.globalToRos(localX, localY);
-            return { x: rosPos.x, y: rosPos.y };
-        }
-
-        function createCustomMarker(rosX, rosY, yawDeg, color, labelText) {
-            const container = new createjs.Container();
-            container.x = rosX;
-            container.y = -rosY; 
-            container.rotation = -yawDeg;
-
-            const dot = new createjs.Shape();
-            dot.graphics.beginFill(color).drawCircle(0, 0, 0.15); 
-            container.addChild(dot);
-
-            const arrow = new createjs.Shape();
-            arrow.graphics.setStrokeStyle(0.08, "round").beginStroke(color);
-            arrow.graphics.moveTo(0.15, 0).lineTo(0.8, 0);
-            arrow.graphics.beginFill(color).moveTo(1.0, 0).lineTo(0.7, -0.25).lineTo(0.7, 0.25).closePath();
-            container.addChild(arrow);
-
-            if (labelText) {
-                const text = new createjs.Text(labelText, "bold 0.6px sans-serif", color);
-                text.textAlign = "center";
-                text.textBaseline = "middle";
-                text.regY = 0.5; 
-                text.rotation = yawDeg + 90; 
-                container.textLabel = text;
-                container.addChild(text);
-            }
-
-            viewer.scene.addChild(container);
-            return container;
-        }
-
-        function initMap() {
-            const container = document.getElementById('map-wrapper');
-            const mapDiv = document.getElementById('map');
-
-            const canvasW = container.clientHeight; 
-            const canvasH = container.clientWidth;  
-            mapDiv.style.width = canvasW + 'px';
-            mapDiv.style.height = canvasH + 'px';
-
-            viewer = new ROS2D.Viewer({
-                divID: 'map',
-                width: canvasW,
-                height: canvasH
-            });
-
-            gridClient = new ROS2D.OccupancyGridClient({
-                ros: ros,
-                rootObject: viewer.scene,
-                continuous: true,
-                topic: '/map'
-            });
-
-            gridClient.on('change', () => {
-                viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
-                viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
-                if (viewer.scene) viewer.scene.update();
-            });
-
-            // Safety-net redraw loop: guarantees the SLAM canvas keeps repainting
-            // as new occupancy grid data streams in, even if the internal ticker stalls.
-            setInterval(() => {
-                if (viewer && viewer.scene) viewer.scene.update();
-            }, 200);
-
-            const resizeObserver = new ResizeObserver(() => {
-                if (viewer && viewer.scene && viewer.scene.canvas) {
-                    const newCanvasW = container.clientHeight;
-                    const newCanvasH = container.clientWidth;
-                    mapDiv.style.width = newCanvasW + 'px';
-                    mapDiv.style.height = newCanvasH + 'px';
-                    viewer.scene.canvas.width = newCanvasW;
-                    viewer.scene.canvas.height = newCanvasH;
-                    viewer.width = newCanvasW;
-                    viewer.height = newCanvasH;
-                    if (gridClient && gridClient.currentGrid) {
-                        viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
-                        viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
-                    }
-                }
-            });
-            resizeObserver.observe(container);
-
-            container.addEventListener('pointerdown', (evt) => {
-                if (!gridClient.currentGrid) return;
-                container.setPointerCapture(evt.pointerId);
-                isDragging = true;
-                
-                dragStartRos = getRosCoordsFromEvent(evt, container);
-                
-                const arrowColor = clickMode === 'single' ? '#0077ff' : '#E30035';
-                const label = clickMode === 'waypoint' ? String(waypointsData.length + 1) : "T";
-                
-                activeArrow = createCustomMarker(dragStartRos.x, dragStartRos.y, 0, arrowColor, label);
-                activeArrow.currentYawDeg = 0; 
-            });
-
-            container.addEventListener('pointermove', (evt) => {
-                if (!isDragging || !activeArrow) return;
-                
-                const currentRos = getRosCoordsFromEvent(evt, container);
-                const dx = currentRos.x - dragStartRos.x;
-                const dy = currentRos.y - dragStartRos.y;
-
-                if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
-                    const yawRad = Math.atan2(dy, dx);
-                    const yawDeg = yawRad * (180 / Math.PI);
-                    
-                    activeArrow.currentYawDeg = yawDeg;
-                    activeArrow.rotation = -yawDeg; 
-                    if (activeArrow.textLabel) {
-                        activeArrow.textLabel.rotation = yawDeg + 90;
-                    }
-                }
-            });
-
-            container.addEventListener('pointerup', (evt) => {
-                if (!isDragging) return;
-                isDragging = false;
-                container.releasePointerCapture(evt.pointerId);
-
-                const finalX = dragStartRos.x;
-                const finalY = dragStartRos.y;
-                const finalYaw = activeArrow.currentYawDeg;
-
-                if (clickMode === 'single') {
-                    if (singleArrowMarker) {
-                        viewer.scene.removeChild(singleArrowMarker);
-                    }
-                    singleArrowMarker = activeArrow;
-                    updateUIInputs(finalX, finalY, finalYaw);
-                } else {
-                    waypointMarkers.push(activeArrow);
-                    waypointsData.push({ x: finalX, y: finalY, yaw: finalYaw });
-                    updateWaypointsUI();
-                }
-
-                activeArrow = null;
-            });
-        }
-
-        function updateUIInputs(x, y, yaw) {
-            document.getElementById('target-x').value = x.toFixed(2);
-            document.getElementById('target-y').value = y.toFixed(2);
-            document.getElementById('target-yaw').value = yaw.toFixed(2);
-            document.getElementById('lbl-x').textContent = x.toFixed(2);
-            document.getElementById('lbl-y').textContent = y.toFixed(2);
-            document.getElementById('lbl-yaw').textContent = yaw.toFixed(2);
-            updateTelemetryLocation(x, y, yaw);
-        }
-
-        function updateSingleFromInputs() {
-            const x = parseFloat(document.getElementById('target-x').value) || 0;
-            const y = parseFloat(document.getElementById('target-y').value) || 0;
-            const yaw = parseFloat(document.getElementById('target-yaw').value) || 0;
-
-            document.getElementById('lbl-x').textContent = x.toFixed(2);
-            document.getElementById('lbl-y').textContent = y.toFixed(2);
-            document.getElementById('lbl-yaw').textContent = yaw.toFixed(2);
-            updateTelemetryLocation(x, y, yaw);
-
-            if (viewer && viewer.scene) {
-                if (singleArrowMarker) viewer.scene.removeChild(singleArrowMarker);
-                singleArrowMarker = createCustomMarker(x, y, yaw, '#0077ff', "T");
-            }
-        }
-
-        function updateWaypointsUI() {
-            const container = document.getElementById('waypoints-container');
-            container.innerHTML = waypointsData.length === 0 ? "<em>No waypoints added.</em>" : "";
-            
-            waypointsData.forEach((wp, index) => {
-                const div = document.createElement('div');
-                div.innerHTML = `<strong>WP ${index + 1}:</strong> X:${wp.x.toFixed(2)} Y:${wp.y.toFixed(2)} Yaw:${wp.yaw.toFixed(0)}&deg;`;
-                container.appendChild(div);
-            });
-        }
-
-        function clearMarkers() {
-            if (viewer && viewer.scene) {
-                if (singleArrowMarker) {
-                    viewer.scene.removeChild(singleArrowMarker);
-                    singleArrowMarker = null;
-                }
-                waypointMarkers.forEach(marker => viewer.scene.removeChild(marker));
-                waypointMarkers = [];
-                waypointsData = [];
-                updateWaypointsUI();
-            }
-        }
-
-        // ---- HTTP Action Dispatchers ----
-        function yawDegToQuaternion(yawDeg) {
-            const yawRad = (yawDeg * Math.PI) / 180;
-            return { yaw_z: Math.sin(yawRad / 2), yaw_w: Math.cos(yawRad / 2) };
-        }
-
-        function showToast(message) {
-            let toast = document.getElementById('app-toast');
-            if (!toast) {
-                toast = document.createElement('div');
-                toast.id = 'app-toast';
-                toast.className = 'app-toast';
-                document.body.appendChild(toast);
-            }
-            toast.textContent = message;
-            toast.classList.add('show');
-            clearTimeout(toast._hideTimer);
-            toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 3500);
-        }
-
-        const CONNECTION_ERROR_MSG = "Sorry, I am having trouble connecting. Try again later.";
-
-        async function sendGoalPose() {
-            const x = parseFloat(document.getElementById('target-x').value);
-            const y = parseFloat(document.getElementById('target-y').value);
-            const yawDeg = parseFloat(document.getElementById('target-yaw').value) || 0;
-            const q = yawDegToQuaternion(yawDeg);
-            try {
-                await fetch('/navigate_to_pose', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ x: x, y: y, yaw_w: q.yaw_w })
-                });
-            } catch (err) { showToast(CONNECTION_ERROR_MSG); }
-        }
-
-        async function sendInitialPose() {
-            const x = parseFloat(document.getElementById('target-x').value);
-            const y = parseFloat(document.getElementById('target-y').value);
-            const yawDeg = parseFloat(document.getElementById('target-yaw').value) || 0;
-            const q = yawDegToQuaternion(yawDeg);
-            try {
-                await fetch('/set_initial_pose', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ x: x, y: y, yaw_w: q.yaw_w })
-                });
-            } catch (err) { showToast(CONNECTION_ERROR_MSG); }
-        }
-
-        async function sendWaypoints() {
-            if (waypointsData.length === 0) return;
-            const waypoints = waypointsData.map(wp => {
-                const q = yawDegToQuaternion(wp.yaw);
-                return { x: wp.x, y: wp.y, yaw_w: q.yaw_w };
-            });
-            try {
-                await fetch('/follow_waypoints', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ waypoints: waypoints })
-                });
-            } catch (err) { showToast(CONNECTION_ERROR_MSG); }
-        }
-
-        async function sendAbort() {
-            try {
-                await fetch('/abort', { method: 'POST' });
-            } catch (err) { showToast(CONNECTION_ERROR_MSG); }
-        }
-
-
-        // ---- Web Audio API - Emo Sound FX ----
-        let audioCtx = null;
-
-        function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-        }
-
-        function playStartupSound() {
-            try {
-                initAudio();
-                const now = audioCtx.currentTime;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(440, now);
-                osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
-                gain.gain.setValueAtTime(0.06, now);
-                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.start(now);
-                osc.stop(now + 0.25);
-            } catch (e) { console.log(e); }
-        }
-
-        function playListenSound() {
-            try {
-                initAudio();
-                const now = audioCtx.currentTime;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(587.33, now);
-                osc.frequency.setValueAtTime(880, now + 0.08);
-                gain.gain.setValueAtTime(0.05, now);
-                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.start(now);
-                osc.stop(now + 0.2);
-            } catch (e) { console.log(e); }
-        }
-
-        function playProcessingSound() {
-            try {
-                initAudio();
-                const now = audioCtx.currentTime;
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(320, now);
-                osc.frequency.linearRampToValueAtTime(160, now + 0.1);
-                gain.gain.setValueAtTime(0.04, now);
-                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.start(now);
-                osc.stop(now + 0.12);
-            } catch (e) { console.log(e); }
-        }
-
-
-        // ---- Helio Voice Agent Logic (Looping + History Tracking) ----
-        const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition = null;
-        let inactivityTimer = null;
-        let currentCallId = null; 
-        
-        const modal = document.getElementById('voice-modal');
-        const robotFace = document.getElementById('robot-face');
-        const captionStatus = document.getElementById('caption-status');
-        const captionText = document.getElementById('caption-text');
-        const historyListEl = document.getElementById('history-list');
-        
-        let agentState = 'idle'; 
-        window.currentUtterance = null;
-
-        function appendHistory(sender, text) {
-            const item = document.createElement('div');
-            item.className = `history-item ${sender}`; // 'you' or 'agent'
-            
-            const label = document.createElement('div');
-            label.className = 'history-label';
-            label.textContent = sender === 'you' ? 'you:' : 'agent:';
-            
-            const content = document.createElement('div');
-            content.textContent = text;
-            
-            item.appendChild(label);
-            item.appendChild(content);
-            historyListEl.appendChild(item);
-            historyListEl.scrollTop = historyListEl.scrollHeight;
-        }
-
-        if (SpeechRecognitionImpl) {
-            recognition = new SpeechRecognitionImpl();
-            recognition.continuous = false;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
-
-            recognition.onstart = () => {
-                agentState = 'listening';
-                setRobotMood('listening', 'Listening', 'Speak your command...');
-                playListenSound();
-
-                if (inactivityTimer) clearTimeout(inactivityTimer);
-                inactivityTimer = setTimeout(() => {
-                    if (agentState === 'listening') {
-                        const text = captionText.textContent.trim();
-                        if (text === '' || text === 'Speak now...' || text === 'Listening...' || text === 'Listening for next command...') {
-                            closeVoiceModal();
-                        }
-                    }
-                }, 6000);
-            };
-
-            recognition.onerror = (e) => {
-                if (agentState === 'listening') {
-                    setRobotMood('listening', 'Error', `Voice error: ${e.error}`);
-                    setTimeout(closeVoiceModal, 3000);
-                }
-            };
-
-            recognition.onresult = (event) => {
-                if (agentState !== 'listening') return;
-                
-                let interimTranscript = '';
-                let finalTranscript = '';
-
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const transcript = event.results[i][0].transcript;
-                    if (event.results[i].isFinal) {
-                        finalTranscript += transcript;
-                    } else {
-                        interimTranscript += transcript;
-                    }
-                }
-                
-                const currentText = finalTranscript || interimTranscript;
-                if (currentText.trim().length > 0) {
-                    captionText.textContent = currentText;
-                    if (inactivityTimer) clearTimeout(inactivityTimer);
-                }
-
-                if (finalTranscript.trim().length > 0) {
-                    const finalMsg = finalTranscript.trim();
-                    appendHistory('you', finalMsg);
-                    processVoiceCommand(finalMsg);
-                }
-            };
-
-            recognition.onend = () => {
-                if (agentState === 'listening') {
-                    const text = captionText.textContent.trim();
-                    if (text === '' || text === 'Speak now...' || text === 'Listening...' || text === 'Listening for next command...') {
-                        closeVoiceModal();
-                    }
-                }
-            };
-        } else {
-            console.warn('Speech Recognition not supported in this browser.');
-        }
-
-        function setRobotMood(className, statusMsg, captionMsg) {
-            robotFace.className = 'robot-face ' + className;
-            if (statusMsg !== null) captionStatus.textContent = statusMsg;
-            if (captionMsg !== null) captionText.textContent = captionMsg;
-        }
-
-        function openVoiceModal() {
-            if (!recognition) return alert("Voice not supported on this browser.");
-            modal.classList.add('active');
-            playStartupSound();
-
-            // Comic-style greeting bubble
-            const bubble = document.getElementById('speech-bubble');
-            const greeting = 'Hello! How can I help?';
-            if (bubble) {
-                bubble.textContent = greeting;
-                bubble.classList.add('show');
-                setTimeout(() => bubble.classList.remove('show'), 3200);
-            }
-
-            // Generate a random 3-digit string call_id on open
-            if (!currentCallId) {
-                currentCallId = String(Math.floor(Math.random() * 900) + 100);
-            }
-
-            // Speak the greeting first, then start listening once it finishes
-            agentState = 'speaking';
-            setRobotMood('speaking', 'Helio', greeting);
-
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const greetUtterance = new SpeechSynthesisUtterance(greeting);
-                greetUtterance.lang = 'en-US';
-                greetUtterance.rate = 1.0;
-                greetUtterance.onend = () => {
-                    if (modal.classList.contains('active')) {
-                        try { recognition.start(); } catch(e) { console.log(e); }
-                    }
-                };
-                window.currentUtterance = greetUtterance;
-                window.speechSynthesis.speak(greetUtterance);
-            } else {
-                try { recognition.start(); } catch(e) { console.log(e); }
-            }
-        }
-
-        function closeVoiceModal() {
-            agentState = 'idle';
-            if (inactivityTimer) clearTimeout(inactivityTimer);
-            modal.classList.remove('active');
-            
-            // Clear session history and call_id when popup is closed
-            currentCallId = null;
-            historyListEl.innerHTML = '';
-            const bubble = document.getElementById('speech-bubble');
-            if (bubble) bubble.classList.remove('show');
-
-            if (recognition) {
-                try { recognition.stop(); } catch(e){}
-            }
-            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-        }
-
-        async function processVoiceCommand(text) {
-            agentState = 'thinking';
-            if (inactivityTimer) clearTimeout(inactivityTimer);
-            try { recognition.stop(); } catch(e){}
-            
-            setRobotMood('thinking', 'Processing', text);
-            playProcessingSound();
-
-            try {
-                const response = await fetch('http://'+ window.location.hostname+':8001/agentic/waregv', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, call_id: currentCallId })
-                });
-
-                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-
-                const data = await response.json();
-                const agentResponseText = data.output || "I didn't receive a valid response.";
-                
-                appendHistory('agent', agentResponseText);
-                speakAndLoop(agentResponseText);
-
-            } catch (err) {
-                const friendlyMsg = "Sorry, I am having trouble connecting. Try again later.";
-                appendHistory('agent', friendlyMsg);
-                speakThenClose(friendlyMsg);
-            }
-        }
-
-        function speakThenClose(text) {
-            agentState = 'speaking';
-            setRobotMood('speaking', 'Connection Error', text);
-
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'en-US';
-                utterance.rate = 1.0;
-                utterance.onend = () => setTimeout(closeVoiceModal, 600);
-                window.currentUtterance = utterance;
-                window.speechSynthesis.speak(utterance);
-            } else {
-                setTimeout(closeVoiceModal, 3000);
-            }
-        }
-
-        function speakAndLoop(text) {
-            agentState = 'speaking';
-            setRobotMood('speaking', 'Response', text);
-
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'en-US';
-                utterance.rate = 1.0;
-                
-                utterance.onend = () => {
-                    if (modal.classList.contains('active')) {
-                        agentState = 'listening';
-                        setRobotMood('listening', 'Listening', 'Listening for next command...');
-                        try {
-                            recognition.start();
-                        } catch (e) { console.log(e); }
-                    }
-                };
-
-                window.currentUtterance = utterance;
-                window.speechSynthesis.speak(utterance);
-            } else {
-                setTimeout(closeVoiceModal, 4000); 
-            }
-        }
+        })();
     </script>
 </body>
 </html>
