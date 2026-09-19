@@ -943,7 +943,7 @@ function yawDegToQuaternion(yawDeg) {
     return { yaw_z: Math.sin(r / 2), yaw_w: Math.cos(r / 2) };
 }
 async function postJSON(url, body) {
-    const r = await fetch(url, {
+    const r = await fetch("http://"+ROVER_IP+url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body)
     });
