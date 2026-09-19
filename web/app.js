@@ -1034,7 +1034,7 @@ async function fetchMode() {
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), 4000);
     try {
-        const r = await fetch(CFG.modeUrl, { cache: 'no-store', signal: ctl.signal });
+        const r = await fetch("http://"+ROVER_HOST+":8000/"+CFG.modeUrl, { cache: 'no-store', signal: ctl.signal });
         if (!r.ok) return undefined;
         const text = await r.text();
         let raw = text;
@@ -1124,7 +1124,7 @@ async function applySystemMode() {
     notify('INFO', 'Switching to ' + MODE_LABELS[mode] + '… waiting up to ' + (CFG.modeTimeoutMs / 1000) + ' s for confirmation.');
     scheduleModePoll();
 
-    try { await postJSON(CFG.modeUrl, { mode, map_name: mapName }); }
+    try { await postJSON("http://"+ROVER_HOST+":8000/"+CFG.modeUrl, { mode, map_name: mapName }); }
     catch (e) {
         if (pending === p) { clearPending(); notify('ERROR', 'Mode request failed: ' + e.message); }
     }
