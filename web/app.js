@@ -955,7 +955,13 @@ async function withBusy(btn, fn) {
     try { return await fn(); }
     finally { if (btn) { btn.classList.remove('loading'); btn.disabled = false; } }
 }
+
 function run(btn, fn) { return withBusy(btn, fn); }
+function runNavButton(btn, fn) { return withBusy(btn, fn); }
+
+// Explicitly bind to window for inline HTML handlers
+window.run = run;
+window.runNavButton = runNavButton;
 
 function readTarget() {
     return {
@@ -1124,7 +1130,7 @@ async function applySystemMode() {
     notify('INFO', 'Switching to ' + MODE_LABELS[mode] + '… waiting up to ' + (CFG.modeTimeoutMs / 1000) + ' s for confirmation.');
     scheduleModePoll();
 
-    try { await postJSON("http://"+ROVER_HOST+":8000"+CFG.modeUrl, { mode, map_name: mapName }); }
+    try { await postJSON(CFG.modeUrl, { mode, map_name: mapName }); }
     catch (e) {
         if (pending === p) { clearPending(); notify('ERROR', 'Mode request failed: ' + e.message); }
     }
@@ -1550,13 +1556,21 @@ async function processVoiceCommand(text) {
     startThinkingIndicator();
     playProcessingSound();
 
+    // Check if Hinglish mode is active
+    const isHinglish = document.getElementById('hinglish-toggle') && document.getElementById('hinglish-toggle').checked;
+    const baseMessage = `MAIN PROMPT: ${text}\nUSER INPUT FIELD: ${(document.getElementById('user-input').value || '').trim()}`;
+    
+    const payloadMessage = isHinglish 
+        ? `[CRITICAL INSTRUCTION: The user is speaking in Hinglish (Hindi written in English alphabet). Translate the user's query to English internally to understand it, formulate your response, and then TRANSLATE YOUR ENTIRE FINAL RESPONSE BACK TO HINGLISH. Your final output must be exclusively in Hinglish (Hindi words written with English letters) so the text-to-speech sounds like conversational Hindi.]\n\n${baseMessage}`
+        : baseMessage;
+
     try {
         const response = await fetch('http://' + ROVER_HOST + ':8001/agentic/waregv', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 call_id: currentCallId,
-                message: `MAIN PROMPT: ${text}\nUSER INPUT FIELD: ${(document.getElementById('user-input').value || '').trim()}`
+                message: payloadMessage
             })
         });
 
@@ -1602,7 +1616,11 @@ function speakAndLoop(text) {
     if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'en-US';
+        
+        // Assign Indian accent for Hinglish
+        const isHinglish = document.getElementById('hinglish-toggle') && document.getElementById('hinglish-toggle').checked;
+        utterance.lang = isHinglish ? 'hi-IN' : 'en-US'; 
+        
         utterance.rate = 1.0;
         
         utterance.onend = () => {
@@ -1753,9 +1771,17 @@ if (SpeechRecognitionImpl) {
             const res = ev.results[i];
             for (let j = 0; j < res.length; j++) {
                 const t = res[j].transcript;
+                
+                // while Helio is talking: only a real, sustained human voice may interrupt
+                if (agentState === 'speaking') {
+                    if (isEchoOfSpeech(t)) continue;
+                    if (!bargeInAllowed()) continue;
+                    const wc = (t.toLowerCase().match(/[a-z\u0900-\u097f']+/g) || []).length;
+                    if (WAKE_RE.test(t) || (wc >= 3 && t.trim().length >= 14)) { onWakeWord(WAKE_RE.test(t) ? '' : t); return; }
+                    continue;
+                }
+
                 if (!WAKE_RE.test(t)) continue;
-                // while Helio is talking, ignore the mic hearing Helio's own voice
-                if (agentState === 'speaking' && isEchoOfSpeech(t)) continue;
                 onWakeWord(); return;
             }
         }
@@ -1763,14 +1789,52 @@ if (SpeechRecognitionImpl) {
 }
 
 function isEchoOfSpeech(t) {
-    const words = (t.toLowerCase().match(/[a-z']+/g) || []);
-    if (words.length < 4) return false;
-    const spoken = new Set((String(window.currentSpokenText || '').toLowerCase().match(/[a-z']+/g) || []));
+    const words = (t.toLowerCase().match(/[a-z\u0900-\u097f']+/g) || []);
+    if (!words.length) return true;
+    const spoken = new Set((String(window.currentSpokenText || '').toLowerCase().match(/[a-z\u0900-\u097f']+/g) || []));
     const hit = words.filter(w => spoken.has(w)).length;
-    return hit / words.length >= 0.85;
+    return hit / words.length >= 0.5;
 }
 
-function onWakeWord() {
+// --- Barge-in gate: echo-cancelled mic + sustained loudness above own-voice residual ---
+let vadStream = null, vadCtx = null, vadAn = null, vadBuf = null, vadTimer = null;
+let vadResidual = 0.02, vadLoudSince = 0, vadLastLoud = 0, speakStartAt = 0;
+async function startVad() {
+    if (vadTimer) return;
+    speakStartAt = Date.now(); vadResidual = 0.02; vadLoudSince = 0; vadLastLoud = 0;
+    try {
+        if (!vadStream) vadStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+        if (!vadCtx) {
+            vadCtx = new (window.AudioContext || window.webkitAudioContext)();
+            vadAn = vadCtx.createAnalyser(); vadAn.fftSize = 1024;
+            vadCtx.createMediaStreamSource(vadStream).connect(vadAn);
+            vadBuf = new Float32Array(vadAn.fftSize);
+        }
+        if (vadCtx.state === 'suspended') vadCtx.resume();
+    } catch (e) { return; }
+    vadTimer = setInterval(() => {
+        vadAn.getFloatTimeDomainData(vadBuf);
+        let sum = 0; for (let i = 0; i < vadBuf.length; i++) sum += vadBuf[i] * vadBuf[i];
+        const rms = Math.sqrt(sum / vadBuf.length), now = Date.now();
+        const thr = Math.max(0.09, vadResidual * 3.5);
+        if (rms > thr) {
+            if (!vadLoudSince) vadLoudSince = now;
+            if (now - vadLoudSince > 450) vadLastLoud = now;   // sustained voice
+        } else {
+            vadLoudSince = 0;
+            vadResidual = vadResidual * 0.97 + rms * 0.03;     // learn own-voice leakage
+        }
+    }, 50);
+}
+function stopVad() { if (vadTimer) { clearInterval(vadTimer); vadTimer = null; } }
+function bargeInAllowed() {
+    if (Date.now() - speakStartAt < 1500) return false;        // ignore start-of-speech burst
+    if (!vadTimer) return false;                               // no VAD -> no voice barge-in (Stop button still works)
+    return Date.now() - vadLastLoud < 1500;
+}
+setInterval(() => { if (agentState === 'speaking' && modal.classList.contains('active')) startVad(); else stopVad(); }, 300);
+
+function onWakeWord(initialText = '') {
     stopWake();
     if (modal.classList.contains('active')) {
         window.currentUtterance = null;   // so the cancelled utterance's onend does nothing
@@ -1780,7 +1844,13 @@ function onWakeWord() {
             wakeFromSleep();
         } else if (agentState === 'speaking' || agentState === 'thinking') {
             agentState = 'listening';
-            listenDeadline = 0; heardSpeech = false; lastText = '';
+            listenDeadline = Date.now() + LISTEN_TIMEOUT_MS; 
+            
+            // Buffer the interrupted speech
+            heardSpeech = !!initialText; 
+            lastText = initialText;
+            if (initialText) captionText.textContent = initialText;
+
             setRobotMood('listening', 'Listening', 'Interrupted. Listening...');
             playStartupSound();
             setTimeout(() => { if (agentState === 'listening') startRecognition(); }, 220);
@@ -1810,7 +1880,7 @@ function wakeFromSleep() {
     if (bubble) {
         bubble.textContent = 'Yes?';
         bubble.classList.add('show');
-        setTimeout(() => bubble.classList.remove('show'), 2200);
+        setTimeout(() => bubble.classList.remove('show'), 2202);
     }
     setTimeout(() => {
         if (modal.classList.contains('active') && agentState === 'waking') {
@@ -1835,4 +1905,14 @@ function stopTalking() {
         setTimeout(() => { if (agentState === 'listening') startRecognition(); }, 150);
     }
     notify('INFO', 'Announcer stopped.');
+}
+
+// --- Language Toggle Logic ---
+function setLang(lang) {
+    const isHi = lang === 'hi';
+    const toggle = document.getElementById('hinglish-toggle');
+    if (toggle) toggle.checked = isHi;
+    
+    document.getElementById('btn-en').classList.toggle('active', !isHi);
+    document.getElementById('btn-hi').classList.toggle('active', isHi);
 }

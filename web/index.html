@@ -31,6 +31,11 @@
             cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.4); text-transform: uppercase;
         }
         .map-estop-btn:hover { background: #ff1a4a; transform: scale(1.05); }
+        .helio-fab-wrap {
+            position: fixed !important;
+            z-index: 9999 !important;
+            transform: translate(-50%, -50%) !important;
+        }
     </style>
     <!-- Favicon (same vehicle logo as the sidebar) -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2032%2032%22%3E%3Crect%20width=%2232%22%20height=%2232%22%20rx=%227.5%22%20fill=%22%23007bff%22/%3E%3Cg%20fill=%22%23fff%22%3E%3Crect%20x=%225.15%22%20y=%227%22%20width=%221.2%22%20height=%228%22%20rx=%22.6%22/%3E%3Ccircle%20cx=%225.75%22%20cy=%226.2%22%20r=%221.5%22/%3E%3Cpath%20d=%22M8%2011.5H21.5A5.5%205.5%200%200%201%2027%2017V21A1.5%201.5%200%200%201%2025.5%2022.5H6.5A1.5%201.5%200%200%201%205%2021V14.5A3%203%200%200%201%208%2011.5Z%22/%3E%3Crect%20x=%2223%22%20y=%2214.8%22%20width=%222.6%22%20height=%221.6%22%20rx=%22.5%22%20fill=%22%23007bff%22/%3E%3Ccircle%20cx=%2222.5%22%20cy=%2224%22%20r=%225%22/%3E%3Ccircle%20cx=%229.5%22%20cy=%2224%22%20r=%225%22/%3E%3C/g%3E%3Cg%20fill=%22%23007bff%22%3E%3Ccircle%20cx=%2222.5%22%20cy=%2224%22%20r=%222.3%22/%3E%3Ccircle%20cx=%229.5%22%20cy=%2224%22%20r=%222.3%22/%3E%3C/g%3E%3C/svg%3E">
@@ -91,6 +96,11 @@
                 <div class="zzz" aria-hidden="true"><span>z</span><span>z</span><span>Z</span></div>
                 <div class="think-dots" aria-hidden="true"><span></span><span></span><span></span></div>
                 <div id="speech-bubble" class="speech-bubble">Hello! How can I help?</div>
+                
+                <div class="lang-toggle-wrap">
+                    <button id="btn-en" class="lang-btn active" onclick="setLang('en')">En</button>
+                    <button id="btn-hi" class="lang-btn" onclick="setLang('hi')">Hi</button>
+                </div>
             </div>
 
             <div class="user-input-wrap">
@@ -100,6 +110,11 @@
                     <button id="manual-send-btn" class="manual-send-btn" type="button" onclick="sendManualText()" style="margin-top: 0; min-width: 100px;">
                         SEND
                     </button>
+                </div>
+                <!-- Hinglish Toggle (hidden, manipulated by buttons above) -->
+                <div style="display: none; margin-top: 10px; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="hinglish-toggle">
+                    <label for="hinglish-toggle" style="margin: 0; font-size: 0.75rem; color: var(--muted); text-transform: none; letter-spacing: normal;">Talk in Hindi (English writing)</label>
                 </div>
             </div>
 
@@ -123,7 +138,7 @@
         </div>
     </div>
 
-    <!-- Helio Peeking FAB Container at Bottom Right -->
+    <!-- Helio Peeking FAB Container -->
     <div class="helio-fab-wrap">
         <div id="helio-peek" class="helio-peek-container">
             <div class="peek-robot-head">
@@ -148,24 +163,15 @@
             <div class="brand-container">
                 <div class="brand-logo">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%">
-                        <!-- Background -->
                         <rect width="32" height="32" rx="7.5" fill="#007bff"/>
-                        <!-- Rescaled and Centered Vehicle Group -->
                         <g fill="#ffffff">
-                            <!-- Antenna Mast -->
                             <rect x="5.15" y="7.0" width="1.2" height="8.0" rx="0.6"/>
-                            <!-- Antenna Tip -->
                             <circle cx="5.75" cy="6.2" r="1.5"/>
-                            <!-- Main Chassis -->
                             <path d="M 8.0 11.5 L 21.5 11.5 A 5.5 5.5 0 0 1 27.0 17.0 L 27.0 21.0 A 1.5 1.5 0 0 1 25.5 22.5 L 6.5 22.5 A 1.5 1.5 0 0 1 5.0 21.0 L 5.0 14.5 A 3.0 3.0 0 0 1 8.0 11.5 Z"/>
-                            <!-- Window/Cutout -->
                             <rect x="23.0" y="14.8" width="2.6" height="1.6" rx="0.5" fill="#007bff"/>
-                            <!-- Front Wheel (Right) -->
                             <circle cx="22.5" cy="24.0" r="5.0"/>
-                            <!-- Rear Wheel (Left) -->
                             <circle cx="9.5" cy="24.0" r="5.0"/>
                         </g>
-                        <!-- Wheel Cutouts -->
                         <g fill="#007bff">
                             <circle cx="22.5" cy="24.0" r="2.3"/>
                             <circle cx="9.5" cy="24.0" r="2.3"/>
@@ -406,7 +412,7 @@
             btn.textContent = collapsed ? 'Show' : 'Hide';
         }
 
-        // --- Helio Peeking Animation Logic (drops down from the top-centre button) ---
+        // --- Helio Peeking Animation Logic ---
         const PEEK_MESSAGES = [
             "Ever wondered if you could control a rover hands free?",
             "Hey there how are you?",
@@ -441,12 +447,21 @@
         setInterval(triggerHelioPeek, 6000);
         setTimeout(triggerHelioPeek, 1500);
 
-        // --- Centre the Ask Helio button horizontally on the map panel ---
+        // --- Center Ask Helio button straddling top navbar boundary ---
         function centerHelioOnMap() {
-            const map = document.querySelector('.p-map'), wrap = document.querySelector('.helio-fab-wrap');
+            const map = document.querySelector('.p-map');
+            const wrap = document.querySelector('.helio-fab-wrap');
+            const header = document.querySelector('.header-bar');
             if (!map || !wrap) return;
+
             const r = map.getBoundingClientRect();
             wrap.style.left = (r.left + r.width / 2) + 'px';
+
+            if (header) {
+                const headerBottom = header.getBoundingClientRect().bottom;
+                wrap.style.top = headerBottom + 'px';
+                wrap.style.transform = 'translate(-50%, -50%)';
+            }
         }
         window.addEventListener('resize', centerHelioOnMap);
         window.addEventListener('load', centerHelioOnMap);
