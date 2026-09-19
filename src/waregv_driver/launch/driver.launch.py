@@ -49,7 +49,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        use_sim_time_arg,  # Added missing launch argument
+        use_sim_time_arg,  
         ydlidar_node,
         controller_link,
         motor_encoder,

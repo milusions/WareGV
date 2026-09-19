@@ -37,43 +37,41 @@ def generate_launch_description():
     
     rosbridge_dir = get_package_share_directory('rosbridge_server')
     
+    # Bridges
+    rosbridge_dir = get_package_share_directory('rosbridge_server')
+    
     rosbridge_node = IncludeLaunchDescription(
-        FrontendLaunchDescriptionSource(
-            os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
-        ),
-
-        launch_arguments={
-            'port': '9090',
-            'ssl': 'false'
-        }.items()
-    )
+    FrontendLaunchDescriptionSource(
+        os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
+    ),
+    launch_arguments={'port': '9090', 'ssl': 'false','output': 'log'}.items(),
+)
     
     qos_overrides = {
-    "/initialpose": {
-        "durability": "volatile"
-    },
-    "/map": {
-        "durability": "transient_local",
-        "reliability": "reliable",
-        "history": "keep_last",
-        "depth": 1
+        "/initialpose": {"durability": "volatile"},
+        "/map": {"durability": "transient_local", "reliability": "reliable", "history": "keep_last", "depth": 1}
     }
 
-   }
 
-    foxglove_bridge = IncludeLaunchDescription(
-        XMLLaunchDescriptionSource(
-            PathJoinSubstitution([
-                FindPackageShare('foxglove_bridge'),
-                'launch',
-                'foxglove_bridge_launch.xml'
-            ])
-        ),
-        launch_arguments={
-            'port': '8765',
-            # Convert the dictionary into a JSON string that the XML launch file can parse
-            'topic_qos_overrides': json.dumps(qos_overrides)
-        }.items()
+    foxglove_bridge = GroupAction(
+        actions=[
+            IncludeLaunchDescription(
+                XMLLaunchDescriptionSource(
+                    PathJoinSubstitution([
+                        FindPackageShare('foxglove_bridge'),
+                        'launch',
+                        'foxglove_bridge_launch.xml'
+                    ])
+                ),
+                launch_arguments={
+                    'port': '8765',
+                    'topic_qos_overrides': json.dumps(qos_overrides)
+                }.items()
+            )
+        ],
+        scoped=True,
+        forwarding=True,
+       
     )
     
     twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, 'config', 'twist_mux.yaml')
