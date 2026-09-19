@@ -161,7 +161,7 @@ function saveRoverIpAndReload(v) {
     return true;
 }
 const ROVER_IP = getRoverIp();
-const ROVER_HOST = ROVER_IP || window.location.hostname;   // fallback only while the IP dialog is showing
+const ROVER_HOST = ROVER_IP;   // fallback only while the IP dialog is showing
 
 const ROS_URL = 'ws://' + ROVER_HOST + ':9090';
 const ros = new ROSLIB.Ros({ url: ROS_URL });
