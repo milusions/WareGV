@@ -122,23 +122,12 @@ def generate_launch_description():
         launch_arguments={"use_sim_time":use_sim_time}.items() 
     )
     
-    waregv_mapping_launch_file_path = os.path.join(get_package_share_directory("waregv_mapping"), 'launch', 'mapping.launch.py')
-    waregv_mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
+    waregv_web_dashboard_launch_file_path = os.path.join(get_package_share_directory("waregv_navigation"), 'launch', 'dashboard.launch.py')
+    waregv_web_dashboard = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_web_dashboard_launch_file_path),
         launch_arguments={
             "use_sim_time": use_sim_time,
-            "mapping_enable": mapping_enable_conf
-        }.items() 
-    )
-    
-    waregv_navigation_launch_file_path = os.path.join(get_package_share_directory("waregv_navigation"), 'launch', 'navigation.launch.py')
-    waregv_navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "mapping_enable": mapping_enable_conf, 
-            "navigation_enable": navigation_enable_conf,
-            "map_name":map_name_conf
+  
         }.items() 
     )
     
@@ -167,7 +156,6 @@ def generate_launch_description():
         twist_mux_node,
         waregv_odometry,
         waregv_controller,
-        waregv_mapping,
-        waregv_navigation
+    waregv_web_dashboard,
     ])
 
