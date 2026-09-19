@@ -57,7 +57,9 @@ done
 cd ~/waregv/waregv_ws
 
 colcon build
+
 source /opt/ros/jazzy/setup.bash
+
 source install/setup.bash
 
 
