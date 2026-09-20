@@ -4,6 +4,8 @@ from launch.substitutions.launch_configuration import LaunchConfiguration
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+import os
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     
@@ -54,8 +56,8 @@ def generate_launch_description():
         launch_arguments={
             'enable_accel': 'true',
             'enable_gyro': 'true',
-            'unite_imu_method': '2',        # Interpolate accel & gyro into single /camera/camera/imu topic
-            'enable_infra1': 'true',       # Left infrared camera for stereo VIO
+            'unite_imu_method': '2',     
+            'enable_infra1': 'true',      
             'enable_infra2': 'true',       # Right infrared camera for stereo VIO
             'enable_sync': 'true',         # Hardware timestamp sync
         }.items()
