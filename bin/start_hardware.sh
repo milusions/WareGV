@@ -110,6 +110,6 @@ while kill -0 $LAUNCH_PID 2>/dev/null; do
     echo -e "${PRIMARY}----------------------------------------------------${RESET}"
     echo -e "  ${ACCENT_GREEN}[RUNNING]${RESET}    ${BOLD_WHITE}Live Output (Last 5 Lines):${RESET}\n"
     
-    tail -n 5 "$LOG_FILE" | grep ERROR
+    tail -n 5 "$LOG_FILE"
     sleep 0.5
 done

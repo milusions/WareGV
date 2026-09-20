@@ -12,7 +12,7 @@ find_package(ament_cmake REQUIRED)
   find_package(sensor_msgs REQUIRED)
   find_package(nav_msgs REQUIRED)
   find_package(geometry_msgs REQUIRED)
-  find_package(ov_msckf REQUIRED)
+  # find_package(ov_msckf REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)

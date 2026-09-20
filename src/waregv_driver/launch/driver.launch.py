@@ -41,18 +41,30 @@ def generate_launch_description():
         output="screen",
     )
     
-    camera = Node(
-        package="waregv_driver",
-        executable="camera",
-        parameters=[{"use_sim_time": use_sim_time}],
-        output="screen",
-    )
 
+    realsense_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('realsense2_camera'),
+                'launch',
+                'rs_launch.py'
+            )
+        ]),
+        launch_arguments={
+            'enable_accel': 'true',
+            'enable_gyro': 'true',
+            'unite_imu_method': '2',        # Interpolate accel & gyro into single /camera/camera/imu topic
+            'enable_infra1': 'true',       # Left infrared camera for stereo VIO
+            'enable_infra2': 'true',       # Right infrared camera for stereo VIO
+            'enable_sync': 'true',         # Hardware timestamp sync
+        }.items()
+    )
+    
     return LaunchDescription([
         use_sim_time_arg,  
         ydlidar_node,
-        controller_link,
-        motor_encoder,
-        imu,
-        camera
+        # controller_link,
+        # motor_encoder,
+        # imu,
+        realsense_launch
     ])
