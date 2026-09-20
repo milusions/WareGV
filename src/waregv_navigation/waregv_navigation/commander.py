@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import subprocess
+import os
+import logging
 import json
 import threading
 import time
@@ -12,6 +14,37 @@ from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Empty, String
+
+
+LOG_DIR = os.path.join(os.path.expanduser("~"), "waregv", "waregv_ws", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+
+class _DualLog:
+    """Messages go to the ROS console AND ~/waregv/waregv_ws/logs/command_commander_*.log"""
+    def __init__(self, ros_logger):
+        self.r = ros_logger
+        self.f = logging.getLogger("command_commander")
+        self.f.setLevel(logging.DEBUG)
+        if not self.f.handlers:
+            fh = logging.FileHandler(os.path.join(LOG_DIR, "command_commander_%s.log" % time.strftime("%Y%m%d_%H%M%S")))
+            fh.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d [%(levelname)s] [%(threadName)s] %(message)s", "%F %T"))
+            self.f.addHandler(fh)
+
+    def _w(self, lvl, m):
+        try:
+            getattr(self.r, lvl)(m)
+        except Exception:
+            pass
+        self.f.log({"debug": 10, "info": 20, "warning": 30, "error": 40}[lvl], m)
+        for h in self.f.handlers:
+            h.flush()
+
+    def debug(self, m): self._w("debug", m)
+    def info(self, m): self._w("info", m)
+    def warning(self, m): self._w("warning", m)
+    warn = warning
+    def error(self, m): self._w("error", m)
 
 
 class CommanderNode(Node):
@@ -28,6 +61,7 @@ class CommanderNode(Node):
 
     def __init__(self, node_name="commander_node"):
         super().__init__(node_name)
+        self._lg = _DualLog(Node.get_logger(self))
 
         self.navigator = BasicNavigator()
         self.nav_lock = threading.RLock()
@@ -57,7 +91,7 @@ class CommanderNode(Node):
         self.shutdown_requested = False
         self.abort_requested = False  # Flag for safely aborting from the worker thread
 
-        self.get_logger().info(
+        self._lg.info(
             "Nav2 Commander is running: /nav_to_pose, /follow_waypoints, /abort"
         )
 
@@ -69,7 +103,7 @@ class CommanderNode(Node):
         msg = String()
         msg.data = status_msg
         self.status_pub.publish(msg)
-        self.get_logger().info(f"MISSION STATUS: {status_msg}")
+        self._lg.info(f"MISSION STATUS: {status_msg}")
 
     def publish_feedback(self, distance_remaining=0.0, eta_sec=0.0):
         msg = String()
@@ -86,7 +120,7 @@ class CommanderNode(Node):
                     self.navigator.setInitialPose(msg)
                 self.publish_status("INITIAL_POSE_SET")
             except Exception as exc:
-                self.get_logger().error(f"setInitialPose failed: {exc}")
+                self._lg.error(f"setInitialPose failed: {exc}")
         threading.Thread(target=work, daemon=True, name="initial-pose").start()
 
     def _service_exists(self, service_name: str) -> bool:
@@ -127,7 +161,7 @@ class CommanderNode(Node):
         """
         if time.monotonic() < self.nav2_ready_until and self._service_exists("/bt_navigator/get_state"):
             return True
-        self.get_logger().info("Waiting for Nav2 to become active...")
+        self._lg.info("Waiting for Nav2 to become active...")
 
         localizer = None
         deadline = time.monotonic() + timeout_sec
@@ -157,12 +191,12 @@ class CommanderNode(Node):
                     navigator="bt_navigator",
                 )
             self.nav2_ready_until = time.monotonic() + 20.0
-            self.get_logger().info(
+            self._lg.info(
                 f"Nav2 is active (localizer={localizer or 'not specified'})."
             )
             return True
         except Exception as exc:
-            self.get_logger().error(f"Nav2 activation failed: {exc}")
+            self._lg.error(f"Nav2 activation failed: {exc}")
             return False
 
     # ------------------------------------------------------------------
@@ -172,7 +206,7 @@ class CommanderNode(Node):
     def _begin_goal(self) -> bool:
         with self.goal_lock:
             if self.goal_running:
-                self.get_logger().warning("A navigation mission is already running.")
+                self._lg.warning("A navigation mission is already running.")
                 return False
             self.goal_running = True
             return True
@@ -216,14 +250,14 @@ class CommanderNode(Node):
 
                     distance = getattr(feedback, "distance_remaining", 0.0)
                     self.publish_feedback(distance, eta)
-                    self.get_logger().info(
+                    self._lg.info(
                         f"[{label}] distance={distance:.2f} m | ETA={eta:.0f} s"
                     )
 
                 last_log = now
 
             if now - start > max_duration_sec:
-                self.get_logger().warning(
+                self._lg.warning(
                     f"[{label}] exceeded {max_duration_sec:.0f}s. Aborting."
                 )
                 self._safe_cancel()
@@ -250,7 +284,7 @@ class CommanderNode(Node):
             with self.nav_lock:
                 self.navigator.cancelTask()
         except Exception as exc:
-            self.get_logger().warning(f"cancelTask raised: {exc}")
+            self._lg.warning(f"cancelTask raised: {exc}")
             return
         end = time.monotonic() + wait_sec
         while time.monotonic() < end:
@@ -261,9 +295,10 @@ class CommanderNode(Node):
             except Exception:
                 return
             time.sleep(0.1)
-        self.get_logger().warning("Cancel not confirmed within timeout; continuing.")
+        self._lg.warning("Cancel not confirmed within timeout; continuing.")
 
     def handle_nav_to_pose(self, msg: PoseStamped):
+        self._lg.info(f"RX /nav_to_pose x={msg.pose.position.x:.2f} y={msg.pose.position.y:.2f}")
         if not self._begin_goal():
             self.publish_status("BUSY")
             return
@@ -283,7 +318,7 @@ class CommanderNode(Node):
                 self.publish_status("NAV2_NOT_READY")
                 return
 
-            self.get_logger().info(
+            self._lg.info(
                 f"Sending goal: x={msg.pose.position.x:.3f}, "
                 f"y={msg.pose.position.y:.3f}"
             )
@@ -293,14 +328,15 @@ class CommanderNode(Node):
             self.monitor_task(label="NAVIGATION")
 
         except Exception as exc:
-            self.get_logger().error(f"GoToPose failed: {exc}")
+            self._lg.error(f"GoToPose failed: {exc}")
             self.publish_status("NAVIGATION_FAILED")
         finally:
             self._end_goal()
 
     def handle_follow_waypoints(self, msg: PoseArray):
+        self._lg.info(f"RX /follow_waypoints n={len(msg.poses)}")
         if not msg.poses:
-            self.get_logger().warning("Received an empty waypoint list.")
+            self._lg.warning("Received an empty waypoint list.")
             self.publish_status("WAYPOINTS_EMPTY")
             return
 
@@ -348,7 +384,7 @@ class CommanderNode(Node):
                     goal.pose.orientation.w = 1.0
 
                 waypoints.append(goal)
-                self.get_logger().info(
+                self._lg.info(
                     f"WP {index}/{count}: "
                     f"x={goal.pose.position.x:.3f}, "
                     f"y={goal.pose.position.y:.3f}"
@@ -362,7 +398,7 @@ class CommanderNode(Node):
             )
 
         except Exception as exc:
-            self.get_logger().error(f"FollowWaypoints failed: {exc}")
+            self._lg.error(f"FollowWaypoints failed: {exc}")
             self.publish_status("WAYPOINTS_FAILED")
         finally:
             self._end_goal()
@@ -375,7 +411,7 @@ class CommanderNode(Node):
         self.abort_mission()
 
     def abort_mission(self):
-        self.get_logger().warning("Aborting current navigation mission...")
+        self._lg.warning("Aborting current navigation mission...")
         # Signal the worker thread to safely cancel the task
         self.abort_requested = True
         self.publish_status("ABORT_REQUESTED")
@@ -401,14 +437,14 @@ class CommanderNode(Node):
             )
 
             if res.returncode == 0:
-                self.get_logger().info("Map saved successfully.")
+                self._lg.info("Map saved successfully.")
                 self.publish_status(f"MAP_SAVED:{map_filename}")
             else:
-                self.get_logger().error(f"Map saver failed: {res.stderr}")
+                self._lg.error(f"Map saver failed: {res.stderr}")
                 self.publish_status("MAP_SAVE_FAILED")
 
         except Exception as exc:
-            self.get_logger().error(f"Map saver error: {exc}")
+            self._lg.error(f"Map saver error: {exc}")
             self.publish_status("MAP_SAVE_ERROR")
 
 

@@ -33,6 +33,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(title="Navigation Commander REST Server")
+
+
+@app.middleware("http")
+async def _log_requests(request, call_next):
+    t0 = time.monotonic()
+    try:
+        resp = await call_next(request)
+    except Exception:
+        _make_file_logger("rest").error(f"HTTP {request.method} {request.url.path} EXC\n{_tb.format_exc()}")
+        raise
+    if request.url.path not in ("/system/mode", "/robot/pose", "/navigation/status"):   # skip 1 Hz pollers
+        _make_file_logger("rest").info(f"HTTP {request.method} {request.url.path} -> {resp.status_code} ({(time.monotonic()-t0)*1000:.0f} ms)")
+    return resp
 api_node = None
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +58,47 @@ app.add_middleware(
 HOME_DIR = os.path.expanduser("~")
 SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
 WEB_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "web")
+
+import logging as _logging, glob as _glob, shutil as _shutil, traceback as _tb
+LOG_DIR = os.path.join(os.path.expanduser("~"), "waregv", "waregv_ws", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+SESSION_TS = time.strftime("%Y%m%d_%H%M%S")
+
+
+def tag_log_path(tag):
+    return os.path.join(LOG_DIR, f"command_{tag}_{SESSION_TS}.log")
+
+
+def _make_file_logger(tag):
+    lg = _logging.getLogger(f"command_{tag}")
+    lg.setLevel(_logging.DEBUG)
+    if not lg.handlers:
+        fh = _logging.FileHandler(tag_log_path(tag))
+        fh.setFormatter(_logging.Formatter("%(asctime)s.%(msecs)03d [%(levelname)s] [%(threadName)s] %(message)s", "%F %T"))
+        lg.addHandler(fh)
+    return lg
+
+
+class _DualLog:
+    """Every message goes to the ROS console AND ~/waregv/waregv_ws/logs/command_<tag>_*.log"""
+    def __init__(self, ros_logger, file_logger):
+        self.r, self.f = ros_logger, file_logger
+
+    def _w(self, lvl, m):
+        try:
+            getattr(self.r, "warning" if lvl == "warn" else lvl)(m)
+        except Exception:
+            pass
+        self.f.log({"debug": 10, "info": 20, "warn": 30, "warning": 30, "error": 40}[lvl], m)
+        for h in self.f.handlers:
+            h.flush()
+
+    def debug(self, m): self._w("debug", m)
+    def info(self, m): self._w("info", m)
+    def warn(self, m): self._w("warn", m)
+    warning = warn
+    def error(self, m): self._w("error", m)
+
 HTML_FILE_PATH = os.path.join(WEB_DIR, "index.html")
 
 
@@ -78,6 +132,9 @@ AUTORESTART_STALL = os.environ.get("WAREGV_AUTORESTART_STALL", "0") == "1"
 class CommanderRestAPINode(Node):
     def __init__(self):
         super().__init__("commander_rest_api_node")
+        self._lg = _DualLog(Node.get_logger(self), _make_file_logger("rest"))
+        self._lg.info(f"=== REST node starting. logs in {LOG_DIR}, session {SESSION_TS} ===")
+        self._lg.info(f"which ros2 = {_shutil.which('ros2')} | AMENT_PREFIX_PATH set = {bool(os.environ.get('AMENT_PREFIX_PATH'))} | ROS_DISTRO={os.environ.get('ROS_DISTRO')}")
 
         self.pose_pub = self.create_publisher(PoseStamped, "/nav_to_pose", 10)
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, "/set_initial_pose", 10)
@@ -121,9 +178,20 @@ class CommanderRestAPINode(Node):
         self.create_subscription(LaserScan, "/scan", self._scan_cb, qos_profile_sensor_data)
         self.create_subscription(Log, "/rosout", self._rosout_cb, 50)
         self._stall_since = None
+        from map_msgs.msg import OccupancyGridUpdate
+        from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+        tl = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
+        self.cm = {}
+        for key, base in (("global", "/global_costmap"), ("local", "/local_costmap")):
+            self.cm[key] = {"msg": None, "pub": self.create_publisher(OccupancyGrid, f"/ui/{key}_costmap", 5)}
+            for q in (10, tl):      # volatile AND transient-local so we match either publisher
+                self.create_subscription(OccupancyGrid, f"{base}/costmap", lambda m, k=key: self._cm_full(k, m), q)
+            self.create_subscription(OccupancyGridUpdate, f"{base}/costmap_updates", lambda m, k=key: self._cm_upd(k, m), 10)
+        self.create_timer(0.5, lambda: self._cm_relay("local"))
+        self.create_timer(1.5, lambda: self._cm_relay("global"))
         threading.Thread(target=self._supervisor_loop, daemon=True, name="stack-supervisor").start()
 
-        self.get_logger().info("Commander REST API Node initialized.")
+        self._lg.info("Commander REST API Node initialized.")
 
     def _status_cb(self, msg):
         self.nav_status = msg.data
@@ -150,6 +218,25 @@ class CommanderRestAPINode(Node):
     def _map_cb(self, msg):
         self.last_map = msg
         self.map_wall = time.monotonic()
+
+    def _cm_full(self, key, msg):
+        if self.cm[key]["msg"] is None:
+            self._lg.info(f"costmap '{key}' first full grid {msg.info.width}x{msg.info.height}")
+        self.cm[key]["msg"] = msg
+
+    def _cm_upd(self, key, u):
+        m = self.cm[key]["msg"]
+        if m is None or u.x + u.width > m.info.width or u.y + u.height > m.info.height:
+            return
+        for r in range(u.height):
+            d = (u.y + r) * m.info.width + u.x
+            m.data[d:d + u.width] = u.data[r * u.width:(r + 1) * u.width]
+
+    def _cm_relay(self, key):
+        m = self.cm[key]["msg"]
+        if m is not None:
+            m.header.stamp = self.get_clock().now().to_msg()
+            self.cm[key]["pub"].publish(m)
 
     def _scan_cb(self, _msg):
         self.scan_wall = time.monotonic()
@@ -182,7 +269,7 @@ class CommanderRestAPINode(Node):
             try:
                 return self.tf_buffer.lookup_transform("map", "base_footprint", rclpy.time.Time())
             except Exception as e:
-                self.get_logger().warn(f"Could not get current pose: {e}")
+                self._lg.warn(f"Could not get current pose: {e}")
                 return None
 
     _STACK_PATTERNS = ("slam_toolbox", "bt_navigator", "controller_server",
@@ -214,19 +301,32 @@ class CommanderRestAPINode(Node):
             subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
         self.health.update({"mapping": "OFF", "navigation": "OFF", "slam_map": "N/A"})
 
+    def _preflight(self, cmd):
+        if not _shutil.which("ros2"):
+            raise RuntimeError("'ros2' not found in PATH of the REST server process (environment not sourced?)")
+        pkg = cmd[2]
+        r = subprocess.run(["ros2", "pkg", "prefix", pkg], capture_output=True, text=True, timeout=20)
+        self._lg.info(f"preflight: ros2 pkg prefix {pkg} -> rc={r.returncode} out={r.stdout.strip()} err={r.stderr.strip()}")
+        if r.returncode != 0:
+            raise RuntimeError(f"package '{pkg}' not found by the REST server environment: {r.stderr.strip()}")
+        lf = os.path.join(r.stdout.strip(), "share", pkg, "launch", cmd[3])
+        self._lg.info(f"preflight: launch file {lf} exists={os.path.exists(lf)}")
+
     def _launch_proc(self, cmd, tag):
-        log_path = f"/tmp/waregv_{tag}.log"
+        log_path = tag_log_path(tag)
         logf = open(log_path, "a")
         logf.write(f"\n===== {time.strftime('%F %T')} launching: {' '.join(cmd)} =====\n")
         logf.flush()
         return subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                                stdin=subprocess.DEVNULL, env=os.environ.copy(),
+                                stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1"},
                                 start_new_session=True)
 
     def _spawn(self, cmd, tag):
         """Start a launch file and register it with the supervisor."""
-        self.get_logger().info(f"Launching {' '.join(cmd)}  (log: /tmp/waregv_{tag}.log)")
+        self._lg.info(f"Launching {' '.join(cmd)}  (log: {tag_log_path(tag)})")
+        self._preflight(cmd)
         p = self._launch_proc(cmd, tag)
+        self._lg.info(f"[{tag}] started pid={p.pid}")
         self.stacks[tag] = {"cmd": cmd, "proc": p, "started": time.monotonic(),
                             "missing_since": None, "restarts": []}
         self.active_processes.append(p)
@@ -248,14 +348,14 @@ class CommanderRestAPINode(Node):
         st["restarts"] = [t for t in st["restarts"] if now - t < RESTART_WINDOW_SEC]
         tail = ""
         try:
-            tail = open(f"/tmp/waregv_{tag}.log").read()[-600:]
+            tail = open(tag_log_path(tag)).read()[-600:]
         except Exception:
             pass
         if len(st["restarts"]) >= MAX_RESTARTS:
             self.health[tag] = "FAILED"
-            self.get_logger().error(f"[{tag}] giving up after {MAX_RESTARTS} restarts. Last reason: {reason}\n{tail}")
+            self._lg.error(f"[{tag}] giving up after {MAX_RESTARTS} restarts. Last reason: {reason}\n{tail}")
             return
-        self.get_logger().error(f"[{tag}] {reason} -> restarting. Log tail:\n{tail}")
+        self._lg.error(f"[{tag}] {reason} -> restarting. Log tail:\n{tail}")
         self.health[tag] = "RESTARTING"
         self._stop_proc(st["proc"])
         for pat in (STACK_NODES.get(tag, ()) ):
@@ -279,7 +379,7 @@ class CommanderRestAPINode(Node):
                 finally:
                     self.mode_lock.release()
             except Exception as e:
-                self.get_logger().error(f"supervisor error: {e}")
+                self._lg.error(f"supervisor error: {e}")
 
     def _supervise_once(self):
         nodes = self._live_nodes()
@@ -311,7 +411,7 @@ class CommanderRestAPINode(Node):
             if moving and scans and stale > MAP_STALL_SEC:
                 self.health["slam_map"] = "STALLED"
                 recent = [r for r in list(self.rosout_ring)[-6:] if "slam" in r["node"]]
-                self.get_logger().error(
+                self._lg.error(
                     f"SLAM STALLED: /map unchanged for {stale:.0f}s while robot moves. "
                     f"Recent slam warnings: {recent}")
                 if AUTORESTART_STALL and (now - m["started"]) > STACK_GRACE_SEC:
@@ -341,6 +441,7 @@ class CommanderRestAPINode(Node):
         return self.requested_mode if self.requested_mode in ("manual", "slam", "slam_update", "nav") else None
 
     def switch_system_mode(self, mode: str, map_name: str):
+        self._lg.info(f"SWITCH REQUEST mode={mode} map='{map_name}' (current={self.detect_mode()})")
         if mode not in ("slam", "nav", "slam_update", "manual"):
             raise ValueError(f"Unknown mode '{mode}'")
         if mode in ("nav", "slam_update") and not (map_name or "").strip():
@@ -362,7 +463,7 @@ class CommanderRestAPINode(Node):
             # selected YAML through map_server. This makes the dropdown selection
             # authoritative even when navigation.launch.py has a hard-coded
             # default map internally.
-            self.get_logger().info(f"Starting autonomous driving with selected map: {map_name}")
+            self._lg.info(f"Starting autonomous driving with selected map: {map_name}")
             self._spawn(["ros2", "launch", "waregv_navigation", "navigation.launch.py",
                          "mapping_enable:=false", f"map_name:={map_name}"], "navigation")
             threading.Thread(
@@ -377,7 +478,7 @@ class CommanderRestAPINode(Node):
             # time and hope the saved graph wins a race. First start SLAM
             # Toolbox, wait for its deserialize service, and load the selected
             # serialized graph. Only after that succeeds do we start Nav2.
-            self.get_logger().info(
+            self._lg.info(
                 f"Starting autonomous driving + map update from selected map: {map_name}"
             )
             self._spawn(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], "mapping")
@@ -428,17 +529,17 @@ class CommanderRestAPINode(Node):
         """Force Nav2 map_server to use exactly the map selected in the UI."""
         try:
             yaml_path = self._selected_map_yaml(map_name)
-            self.get_logger().info(f"Loading selected Nav2 map: {yaml_path}")
+            self._lg.info(f"Loading selected Nav2 map: {yaml_path}")
             if not self._wait_for_ros_service("/map_server/load_map", 45):
                 raise RuntimeError("/map_server/load_map service did not become available")
             result = self.load_map_from_yaml(yaml_path)
             if result.result != 0:
                 raise RuntimeError(f"map_server rejected '{yaml_path}' with result code {result.result}")
-            self.get_logger().info(f"Selected map '{map_name}' is now loaded by map_server")
+            self._lg.info(f"Selected map '{map_name}' is now loaded by map_server")
             if last_pose:
                 self.inject_amcl_pose(last_pose)
         except Exception as e:
-            self.get_logger().error(f"Selected map load failed for '{map_name}': {e}")
+            self._lg.error(f"Selected map load failed for '{map_name}': {e}")
 
     def _serialized_map_exists(self, map_name):
         """Return whether SLAM Toolbox serialization files exist for this map."""
@@ -472,7 +573,7 @@ class CommanderRestAPINode(Node):
         )
         if result.returncode != 0:
             raise RuntimeError("SLAM Toolbox deserialize failed: " + (result.stderr or result.stdout).strip())
-        self.get_logger().info(f"SLAM Toolbox loaded serialized map '{map_name}'")
+        self._lg.info(f"SLAM Toolbox loaded serialized map '{map_name}'")
 
     def _start_slam_update_after_load(self, map_name):
         """Load the selected SLAM graph first, then bring up Nav2."""
@@ -480,11 +581,11 @@ class CommanderRestAPINode(Node):
             self._deserialize_slam_map(map_name)
             self._spawn(["ros2", "launch", "waregv_navigation", "navigation.launch.py",
                          "mapping_enable:=true"], "navigation")
-            self.get_logger().info(
+            self._lg.info(
                 f"Autonomous driving + map update started from '{map_name}'"
             )
         except Exception as e:
-            self.get_logger().error(
+            self._lg.error(
                 f"SLAM update for '{map_name}' was not started: {e}"
             )
             # Do not silently leave a fresh mapping session running when the
@@ -567,11 +668,11 @@ class CommanderRestAPINode(Node):
                 # newly saved YAML/PGM/pose-graph files there so the selected
                 # map can actually be loaded on the next mode switch.
                 self._sync_saved_map_to_package_share(name)
-                self.get_logger().info(
+                self._lg.info(
                     f"Map '{name}' saved and synchronized to package-share maps."
                 )
             except Exception as e:
-                self.get_logger().error(f"Map save error: {e}")
+                self._lg.error(f"Map save error: {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def navigate_to_pose(self, x, y, yaw=0.0, yaw_deg=None):
@@ -701,7 +802,11 @@ def http_switch_mode(req: ModeRequest):
         api_node.switch_system_mode(req.mode, req.map_name)
         return {"status": "dispatched", "mode": req.mode}
     except ValueError as e:
+        api_node._lg.warn(f"switch rejected: {e}")
         raise HTTPException(400, str(e))
+    except Exception as e:
+        api_node._lg.error("switch FAILED:\n" + _tb.format_exc())
+        raise HTTPException(500, f"Mode switch failed: {e}")
 
 
 @app.post("/system/mode/load_map")
@@ -1066,7 +1171,7 @@ def http_launch_log(tag: str):
     if tag not in ("mapping", "navigation"):
         raise HTTPException(404, "unknown log")
     try:
-        return {"tail": open(f"/tmp/waregv_{tag}.log").read()[-4000:]}
+        return {"tail": open(tag_log_path(tag)).read()[-4000:]}
     except Exception:
         return {"tail": ""}
 
