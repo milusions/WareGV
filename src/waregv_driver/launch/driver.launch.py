@@ -69,5 +69,5 @@ def generate_launch_description():
         # controller_link,
         # motor_encoder,
         # imu,
-        realsense_launch
+        # realsense_launch
     ])

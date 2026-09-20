@@ -2,6 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import LaserScan
 import ydlidar
 import time
@@ -44,8 +45,13 @@ class YDLidarNode(Node):
 
         self.get_logger().info(f"Connecting directly to YDLidar on {port}")
 
-        # 2. Setup Publisher
-        self.publisher_ = self.create_publisher(LaserScan, 'scan', 10)
+        # 2. Setup Publisher with Best Effort QoS to avoid network buffering delays
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        self.publisher_ = self.create_publisher(LaserScan, 'scan', qos_profile)
 
         # 3. Initialize YDLidar SDK
         self.laser = ydlidar.CYdLidar()
