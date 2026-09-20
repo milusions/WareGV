@@ -21,7 +21,7 @@ def generate_launch_description():
             executable='ydlidar_ros2_driver_node',
             name='ydlidar_ros2_driver_node',
             output='screen',
-            parameters=[config_file_path],
+            parameters=[config_file_path,{"reversion":"true","inverted":"true"}],
         )
 
     
