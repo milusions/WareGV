@@ -22,7 +22,8 @@ class AutonomousDriveManager:
         def worker():
             try:
                 self.node.get_logger().info(f"Starting slam_update mode with map: {map_name}")
-                proc = manual_manager._start_launch("waregv_navigation", "localization_mapping.launch.py", label="AUTONOMOUS_SLAM")
+                # FIXED: Using the correct 'navigation.launch.py' file name
+                proc = manual_manager._start_launch("waregv_navigation", "navigation.launch.py", label="AUTONOMOUS_SLAM")
                 
                 if not self._wait_for_node("slam_toolbox", 60):
                     self.node.get_logger().error("Timed out waiting for slam_toolbox node")
