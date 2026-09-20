@@ -80,7 +80,8 @@ fi
 cd ~/waregv/waregv_ws
 
 echo -e "  ${PRIMARY}[BUILDING]${RESET}   ${BOLD_WHITE}Compiling ROS 2 workspace (colcon build)...${RESET}"
-colcon build > /dev/null 2>&1
+# Removed > /dev/null 2>&1 to allow the build process to print to the screen
+colcon build
 
 echo -e "  ${PRIMARY}[SOURCING]${RESET}   ${DIM_GRAY}Loading ROS 2 Jazzy environment setup...${RESET}"
 source /opt/ros/jazzy/setup.bash
@@ -98,18 +99,20 @@ stdbuf -oL -eL ros2 launch waregv_bringup hardware.launch.py \
 
 LAUNCH_PID=$!
 
-# Live stationary 5-line status card
-while kill -0 $LAUNCH_PID 2>/dev/null; do
-    clear
-    echo -e "${PRIMARY}====================================================${RESET}"
-    echo -e "${PRIMARY}  M I L U S I O N S   W A R E G V${RESET} ${DIM_GRAY}(Hardware)${RESET}"
-    echo -e "${PRIMARY}====================================================${RESET}"
-    echo -e "  ${BOLD_WHITE}System Mode:${RESET}  ${PRIMARY}${MODE}${RESET}"
-    echo -e "  ${BOLD_WHITE}Target Map:${RESET}   ${DIM_GRAY}${MAP_NAME}${RESET}"
-    echo -e "  ${BOLD_WHITE}Log File:${RESET}     ${DIM_GRAY}${LOG_FILE}${RESET}"
-    echo -e "${PRIMARY}----------------------------------------------------${RESET}"
-    echo -e "  ${ACCENT_GREEN}[RUNNING]${RESET}    ${BOLD_WHITE}Live Output (Last 5 Lines):${RESET}\n"
-    
-    tail -n 5 "$LOG_FILE"
-    sleep 0.5
-done
+# Print the status card once instead of looping and clearing
+clear
+echo -e "${PRIMARY}====================================================${RESET}"
+echo -e "${PRIMARY}  M I L U S I O N S   W A R E G V${RESET} ${DIM_GRAY}(Hardware)${RESET}"
+echo -e "${PRIMARY}====================================================${RESET}"
+echo -e "  ${BOLD_WHITE}System Mode:${RESET}  ${PRIMARY}${MODE}${RESET}"
+echo -e "  ${BOLD_WHITE}Target Map:${RESET}   ${DIM_GRAY}${MAP_NAME}${RESET}"
+echo -e "  ${BOLD_WHITE}Log File:${RESET}     ${DIM_GRAY}${LOG_FILE}${RESET}"
+echo -e "${PRIMARY}----------------------------------------------------${RESET}"
+echo -e "  ${ACCENT_GREEN}[RUNNING]${RESET}    ${BOLD_WHITE}Live Output:${RESET}\n"
+
+# Stream the entire log continuously
+tail -f "$LOG_FILE" &
+TAIL_PID=$!
+
+# Keep the script running until the ROS launch process exits
+wait $LAUNCH_PID
