@@ -19,34 +19,44 @@ class AutonomousDriveManager:
         self.log_file_path = os.path.join(LOG_DIR, "autonomous_debug.log")
 
     def start_slam_update_mode(self, map_name: str, manual_manager):
+        """Order matters: SLAM must publish map->odom BEFORE Nav2 activates its
+        global costmap, otherwise lifecycle bringup times out and aborts."""
         def worker():
             try:
                 self.node.get_logger().info(f"Starting slam_update mode with map: {map_name}")
-                # FIXED: Using the correct 'navigation.launch.py' file name
-                proc = manual_manager._start_launch("waregv_navigation", "navigation.launch.py", label="AUTONOMOUS_SLAM")
-                
+
+                # 1) Start SLAM (sensors + slam_toolbox) first
+                manual_manager._start_launch("waregv_mapping", "mapping.launch.py", label="AUTONOMOUS_SLAM_BASE")
                 if not self._wait_for_node("slam_toolbox", 60):
                     self.node.get_logger().error("Timed out waiting for slam_toolbox node")
                     return
 
-                map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
-                base = os.path.join(map_dir, map_name)
-                if not (os.path.exists(base + ".posegraph") and os.path.exists(base + ".data")):
-                    self.node.get_logger().error(
-                        f"No serialized pose graph ({base}.posegraph/.data). slam_toolbox cannot "
-                        "publish map->odom without it. Re-save the map via SLAM mapping, "
-                        "or use pure Nav2 localization (map_server + AMCL) for PGM/YAML-only maps.")
-                    return
-                if self._wait_for_ros_service("/slam_toolbox/deserialize_map", 15):
-                    # match_type 1 = START_AT_FIRST_NODE (robot must start at the mapping origin)
-                    req = "{filename: '" + base.replace("'", "''") + "', match_type: 1}"
-                    res = self._run_command([
-                        "ros2", "service", "call", "/slam_toolbox/deserialize_map",
-                        "slam_toolbox/srv/DeserializePoseGraph", req
-                    ])
-                    self.node.get_logger().info(f"deserialize_map rc={res.returncode} out={res.stdout.strip()} err={res.stderr.strip()}")
+                # 2) Load the saved pose graph so SLAM continues on the existing map
+                base = os.path.join(SLAM_MAP_ROOT, map_name, map_name)
+                if os.path.exists(base + ".posegraph") and os.path.exists(base + ".data"):
+                    if self._wait_for_ros_service("/slam_toolbox/deserialize_map", 30):
+                        # match_type 1 = START_AT_FIRST_NODE (robot must start at mapping origin)
+                        req = "{filename: '" + base.replace("'", "''") + "', match_type: 1}"
+                        res = self._run_command([
+                            "ros2", "service", "call", "/slam_toolbox/deserialize_map",
+                            "slam_toolbox/srv/DeserializePoseGraph", req
+                        ])
+                        self.node.get_logger().info(
+                            f"deserialize_map rc={res.returncode} out={res.stdout.strip()} err={res.stderr.strip()}")
+                    else:
+                        self.node.get_logger().error("deserialize_map service not available")
                 else:
-                    self.node.get_logger().error("deserialize_map service not available")
+                    self.node.get_logger().warn(
+                        f"No {base}.posegraph/.data - SLAM will start a NEW map. "
+                        "Save the map from SLAM mapping to get these files.")
+
+                # 3) Wait until the map frame really exists (/map published)
+                if not self._wait_for_topic("/map", 30):
+                    self.node.get_logger().error("SLAM never published /map; not starting Nav2")
+                    return
+
+                # 4) Now start Nav2
+                manual_manager._start_launch("waregv_navigation", "navigation.launch.py", label="AUTONOMOUS_NAV")
             except Exception as e:
                 self.node.get_logger().error(f"Slam update error: {e}")
         threading.Thread(target=worker, daemon=True).start()
@@ -78,6 +88,14 @@ class AutonomousDriveManager:
         while time.monotonic() < deadline and rclpy.ok():
             node_names = [n.lower() for n in self.node.get_node_names()]
             if any(node_name in n for n in node_names):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _wait_for_topic(self, topic, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and rclpy.ok():
+            if topic in [n for n, _ in self.node.get_topic_names_and_types()]:
                 return True
             time.sleep(0.5)
         return False
