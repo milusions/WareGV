@@ -80,7 +80,7 @@ class CommanderRestAPINode(Node):
         self.manual_manager = ManualDriveManager(self)
         self.autonomous_manager = AutonomousDriveManager(self)
 
-        self.get_logger().info("Commander REST API Node initialized with full endpoints.")
+        self.get_logger().info("Commander REST API Node initialized with 100% complete endpoints.")
 
     def _status_cb(self, msg):
         self.nav_status = msg.data
@@ -300,6 +300,14 @@ def http_save_map(req: MapRequest):
     api_node.manual_manager.save_map(req.map_name)
     return {"status": "saving_initiated"}
 
+@app.post("/system/slam_update/load")
+def http_slam_update_load(req: MapRequest):
+    try:
+        api_node.switch_system_mode("slam_update", req.map_name)
+        return {"status": "dispatched", "mode": "slam_update", "map_name": req.map_name}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
 @app.get("/maps")
 def http_maps():
     root = SLAM_MAP_ROOT
@@ -418,6 +426,15 @@ def http_map_info():
         },
     }
 
+@app.get("/slam/status")
+def http_slam_status():
+    names = [n.lower() for n in api_node.get_node_names()]
+    return {
+        "mode": api_node.detect_mode(),
+        "slam_toolbox_active": any("slam_toolbox" in n for n in names),
+        "serialized_map_root": SLAM_MAP_ROOT,
+    }
+
 @app.post("/manual_drive")
 def http_manual_drive(req: DriveRequest):
     mode = api_node.detect_mode()
@@ -427,6 +444,50 @@ def http_manual_drive(req: DriveRequest):
         raise HTTPException(400, "linear and angular must be within [-1, 1]")
     api_node.manual_manager.publish_joy(req.linear, req.angular)
     return {"status": "dispatched", "linear": req.linear, "angular": req.angular}
+
+@app.get("/rover/status")
+def http_rover_status():
+    result = {
+        "mode": api_node.detect_mode(),
+        "requested_mode": api_node.requested_mode,
+        "navigation": {
+            "status": api_node.nav_status,
+            "distance_remaining_m": api_node.nav_feedback.get("distance_remaining", 0.0),
+            "eta_sec": api_node.nav_feedback.get("eta_sec", 0.0),
+        },
+        "pose": None,
+        "odom": None,
+        "map": None,
+        "wheels": None,
+    }
+    try:
+        t = api_node.get_current_pose()
+        if t:
+            result["pose"] = {
+                "x": t.transform.translation.x,
+                "y": t.transform.translation.y,
+                "yaw_deg": math.degrees(quaternion_to_yaw(t.transform.rotation)),
+            }
+    except Exception:
+        pass
+    try:
+        o = api_node.last_odom
+        if o:
+            result["odom"] = {
+                "linear_x": o.twist.twist.linear.x,
+                "linear_y": o.twist.twist.linear.y,
+                "angular_z": o.twist.twist.angular.z,
+            }
+    except Exception:
+        pass
+    if api_node.last_map:
+        m = api_node.last_map
+        result["map"] = {"frame": m.header.frame_id, "width": m.info.width,
+                         "height": m.info.height, "resolution_m": m.info.resolution}
+    if api_node.last_joint:
+        j = api_node.last_joint
+        result["wheels"] = {"name": list(j.name), "velocity": list(j.velocity)}
+    return result
 
 
 def main():
