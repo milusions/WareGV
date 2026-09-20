@@ -19,7 +19,7 @@ def generate_launch_description():
     # Launch Arguments
     mapping_enable_arg = DeclareLaunchArgument(name="mapping_enable", default_value="true")
     navigation_enable_arg = DeclareLaunchArgument(name="navigation_enable", default_value="true")
-    max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.5")
+    max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.2")
     max_angular_velocity_arg = DeclareLaunchArgument(name="max_angular_velocity", default_value=str(np.pi))
     wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value="0.0325")
     wheel_base_arg = DeclareLaunchArgument(name="wheel_base", default_value="0.176")
