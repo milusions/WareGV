@@ -6,6 +6,8 @@ import threading
 import time
 import json
 import zipfile
+import re
+import shutil
 from typing import List, Optional
 
 import rclpy
@@ -18,7 +20,7 @@ from tf2_ros import Buffer, TransformListener
 from ament_index_python.packages import get_package_share_directory
 from nav2_msgs.srv import LoadMap
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import uvicorn
@@ -245,6 +247,13 @@ class MapRequest(BaseModel):
     map_name: str
 
 
+def safe_map_name(name: str) -> str:
+    name = (name or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+        raise HTTPException(400, "Invalid map name (use letters, digits, _ or -)")
+    return name
+
+
 # REST Endpoints
 @app.get("/")
 def read_root():
@@ -291,8 +300,8 @@ def http_switch_mode(req: ModeRequest):
 
 @app.post("/system/mode/load_map")
 def http_load_map(req: MapRequest):
-    maps_dir = os.path.join(get_package_share_directory("waregv_mapping"), "maps")
-    map_yaml = os.path.join(maps_dir, req.map_name, f"{req.map_name}.yaml")
+    name = safe_map_name(req.map_name)
+    map_yaml = os.path.join(SLAM_MAP_ROOT, name, f"{name}.yaml")
     if not os.path.exists(map_yaml):
         raise HTTPException(404, f"Map YAML not found at: {map_yaml}")
     try:
@@ -327,8 +336,36 @@ def http_maps():
                 maps.append(name)
     return {"maps": maps}
 
+@app.post("/maps")
+async def http_upload_map(
+    map_name: str = Form(...),
+    pgm: UploadFile = File(...),
+    yaml: UploadFile = File(...),
+):
+    name = safe_map_name(map_name)
+    map_dir = os.path.join(SLAM_MAP_ROOT, name)
+    if os.path.exists(map_dir):
+        raise HTTPException(409, f"Map already exists: {name}")
+    os.makedirs(map_dir)
+    try:
+        with open(os.path.join(map_dir, f"{name}.pgm"), "wb") as f:
+            shutil.copyfileobj(pgm.file, f)
+        text = (await yaml.read()).decode("utf-8")
+        # point image field at the renamed pgm
+        if re.search(r"(?m)^image:", text):
+            text = re.sub(r"(?m)^image:.*$", f"image: {name}.pgm", text)
+        else:
+            text = f"image: {name}.pgm\n" + text
+        with open(os.path.join(map_dir, f"{name}.yaml"), "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        shutil.rmtree(map_dir, ignore_errors=True)
+        raise HTTPException(500, f"Upload failed: {e}")
+    return {"status": "success", "map": name}
+
 @app.get("/maps/{map_name}/pgm")
 def http_get_map_pgm(map_name: str):
+    map_name = safe_map_name(map_name)
     path = os.path.join(SLAM_MAP_ROOT, map_name, f"{map_name}.pgm")
     if os.path.exists(path):
         return FileResponse(path, media_type="image/x-portable-graymap")
@@ -336,6 +373,7 @@ def http_get_map_pgm(map_name: str):
 
 @app.get("/maps/{map_name}/yaml")
 def http_get_map_yaml(map_name: str):
+    map_name = safe_map_name(map_name)
     path = os.path.join(SLAM_MAP_ROOT, map_name, f"{map_name}.yaml")
     if os.path.exists(path):
         return FileResponse(path, media_type="text/yaml")
@@ -343,6 +381,7 @@ def http_get_map_yaml(map_name: str):
 
 @app.get("/maps/{map_name}/zip")
 def http_get_map_zip(map_name: str):
+    map_name = safe_map_name(map_name)
     map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
     if not os.path.isdir(map_dir):
         raise HTTPException(404, f"Map directory not found: {map_name}")
@@ -360,11 +399,11 @@ def http_get_map_zip(map_name: str):
 
 @app.delete("/maps/{map_name}")
 def http_delete_map(map_name: str):
+    map_name = safe_map_name(map_name)
     map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
     if not os.path.isdir(map_dir):
         raise HTTPException(404, f"Map not found: {map_name}")
     try:
-        import shutil
         shutil.rmtree(map_dir)
         return {"status": "success", "message": f"Deleted map: {map_name}"}
     except Exception as e:
