@@ -4,6 +4,8 @@ import math
 import os
 import threading
 import time
+import json
+import zipfile
 from typing import List, Optional
 
 import rclpy
@@ -17,7 +19,7 @@ from ament_index_python.packages import get_package_share_directory
 from nav2_msgs.srv import LoadMap
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +30,13 @@ from waregv_navigation.autonomous_drive import AutonomousDriveManager
 
 app = FastAPI(title="Navigation Commander REST Server")
 api_node = None
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 HOME_DIR = os.path.expanduser("~")
 SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
@@ -36,6 +44,7 @@ WEB_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "web")
 HTML_FILE_PATH = os.path.join(WEB_DIR, "index.html")
 LOG_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
+
 
 def quaternion_to_yaw(q):
     return math.atan2(
@@ -87,7 +96,6 @@ class CommanderRestAPINode(Node):
 
     def _feedback_cb(self, msg):
         try:
-            import json
             self.nav_feedback = json.loads(msg.data)
         except Exception:
             pass
@@ -318,6 +326,49 @@ def http_maps():
             if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.yaml")):
                 maps.append(name)
     return {"maps": maps}
+
+@app.get("/maps/{map_name}/pgm")
+def http_get_map_pgm(map_name: str):
+    path = os.path.join(SLAM_MAP_ROOT, map_name, f"{map_name}.pgm")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="image/x-portable-graymap")
+    raise HTTPException(404, f"PGM file not found for map: {map_name}")
+
+@app.get("/maps/{map_name}/yaml")
+def http_get_map_yaml(map_name: str):
+    path = os.path.join(SLAM_MAP_ROOT, map_name, f"{map_name}.yaml")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/yaml")
+    raise HTTPException(404, f"YAML file not found for map: {map_name}")
+
+@app.get("/maps/{map_name}/zip")
+def http_get_map_zip(map_name: str):
+    map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
+    if not os.path.isdir(map_dir):
+        raise HTTPException(404, f"Map directory not found: {map_name}")
+    
+    zip_path = os.path.join("/tmp", f"{map_name}.zip")
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(map_dir):
+            for file in files:
+                full_path = os.path.join(root, file)
+                zipf.write(full_path, arcname=file)
+                
+    if os.path.exists(zip_path):
+        return FileResponse(zip_path, media_type="application/zip", filename=f"{map_name}.zip")
+    raise HTTPException(500, "Failed to generate map zip archive")
+
+@app.delete("/maps/{map_name}")
+def http_delete_map(map_name: str):
+    map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
+    if not os.path.isdir(map_dir):
+        raise HTTPException(404, f"Map not found: {map_name}")
+    try:
+        import shutil
+        shutil.rmtree(map_dir)
+        return {"status": "success", "message": f"Deleted map: {map_name}"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 @app.post("/navigate_to_pose")
 def http_navigate_to_pose(req: PoseRequest):
