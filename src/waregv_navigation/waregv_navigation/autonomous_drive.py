@@ -29,14 +29,24 @@ class AutonomousDriveManager:
                     self.node.get_logger().error("Timed out waiting for slam_toolbox node")
                     return
 
+                map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
+                base = os.path.join(map_dir, map_name)
+                if not (os.path.exists(base + ".posegraph") and os.path.exists(base + ".data")):
+                    self.node.get_logger().error(
+                        f"No serialized pose graph ({base}.posegraph/.data). slam_toolbox cannot "
+                        "publish map->odom without it. Re-save the map via SLAM mapping, "
+                        "or use pure Nav2 localization (map_server + AMCL) for PGM/YAML-only maps.")
+                    return
                 if self._wait_for_ros_service("/slam_toolbox/deserialize_map", 15):
-                    map_dir = os.path.join(SLAM_MAP_ROOT, map_name)
-                    base = os.path.join(map_dir, map_name)
-                    req = "{filename: '" + base.replace("'", "''") + "'}"
-                    self._run_command([
+                    # match_type 1 = START_AT_FIRST_NODE (robot must start at the mapping origin)
+                    req = "{filename: '" + base.replace("'", "''") + "', match_type: 1}"
+                    res = self._run_command([
                         "ros2", "service", "call", "/slam_toolbox/deserialize_map",
                         "slam_toolbox/srv/DeserializePoseGraph", req
                     ])
+                    self.node.get_logger().info(f"deserialize_map rc={res.returncode} out={res.stdout.strip()} err={res.stderr.strip()}")
+                else:
+                    self.node.get_logger().error("deserialize_map service not available")
             except Exception as e:
                 self.node.get_logger().error(f"Slam update error: {e}")
         threading.Thread(target=worker, daemon=True).start()

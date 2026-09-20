@@ -337,41 +337,43 @@ def http_maps():
     return {"maps": maps}
 
 @app.post("/maps")
-async def http_upload_map(request: Request):
-    form = await request.form()
-    name = None
-    pgm_file = yaml_file = None
-    for _key, val in form.multi_items():
-        if hasattr(val, "filename"):  # file field
-            fn = (val.filename or "").lower()
-            if fn.endswith(".pgm"):
-                pgm_file = val
-            elif fn.endswith((".yaml", ".yml")):
-                yaml_file = val
-        elif name is None:
-            name = val
-    if not (name and pgm_file and yaml_file):
-        raise HTTPException(400, "Need a map name, a .pgm file and a .yaml file")
-
-    name = safe_map_name(name)
+def http_create_map(req: MapRequest):
+    name = safe_map_name(req.map_name)
     map_dir = os.path.join(SLAM_MAP_ROOT, name)
     if os.path.exists(map_dir):
         raise HTTPException(409, f"Map already exists: {name}")
     os.makedirs(map_dir)
-    try:
-        with open(os.path.join(map_dir, f"{name}.pgm"), "wb") as f:
-            shutil.copyfileobj(pgm_file.file, f)
-        text = (await yaml_file.read()).decode("utf-8")
-        if re.search(r"(?m)^image:", text):
-            text = re.sub(r"(?m)^image:.*$", f"image: {name}.pgm", text)
-        else:
-            text = f"image: {name}.pgm\n" + text
-        with open(os.path.join(map_dir, f"{name}.yaml"), "w", encoding="utf-8") as f:
-            f.write(text)
-    except Exception as e:
-        shutil.rmtree(map_dir, ignore_errors=True)
-        raise HTTPException(500, f"Upload failed: {e}")
     return {"status": "success", "map": name}
+
+@app.put("/maps/{map_name}/pgm")
+async def http_put_map_pgm(map_name: str, request: Request):
+    name = safe_map_name(map_name)
+    map_dir = os.path.join(SLAM_MAP_ROOT, name)
+    if not os.path.isdir(map_dir):
+        raise HTTPException(404, f"Map not found: {name}")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "Empty PGM body")
+    with open(os.path.join(map_dir, f"{name}.pgm"), "wb") as f:
+        f.write(data)
+    return {"status": "success"}
+
+@app.put("/maps/{map_name}/yaml")
+async def http_put_map_yaml(map_name: str, request: Request):
+    name = safe_map_name(map_name)
+    map_dir = os.path.join(SLAM_MAP_ROOT, name)
+    if not os.path.isdir(map_dir):
+        raise HTTPException(404, f"Map not found: {name}")
+    text = (await request.body()).decode("utf-8")
+    if not text.strip():
+        raise HTTPException(400, "Empty YAML body")
+    if re.search(r"(?m)^image:", text):
+        text = re.sub(r"(?m)^image:.*$", f"image: {name}.pgm", text)
+    else:
+        text = f"image: {name}.pgm\n" + text
+    with open(os.path.join(map_dir, f"{name}.yaml"), "w", encoding="utf-8") as f:
+        f.write(text)
+    return {"status": "success"}
 
 @app.get("/maps/{map_name}/pgm")
 def http_get_map_pgm(map_name: str):
