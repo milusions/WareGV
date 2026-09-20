@@ -74,10 +74,10 @@
     </gazebo>
 
     <gazebo reference="camera_link">
-        <sensor name="imu_2" type="imu">
+        <sensor name="imu_camera" type="imu">
             <always_on>true</always_on>
             <update_rate>100</update_rate>
-            <topic>/imu_2</topic>
+            <topic>/imu_camera</topic>
            
             <gz_frame_id>camera_link</gz_frame_id> 
             <imu>

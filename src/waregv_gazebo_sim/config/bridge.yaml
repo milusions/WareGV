@@ -12,8 +12,8 @@
   direction: GZ_TO_ROS
   lazy: true
 
-- ros_topic_name: "/imu_2"
-  gz_topic_name: "/imu_2"
+- ros_topic_name: "/imu_camera"
+  gz_topic_name: "/imu_camera"
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "gz.msgs.IMU" 
   direction: GZ_TO_ROS
