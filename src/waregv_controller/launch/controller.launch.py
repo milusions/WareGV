@@ -16,11 +16,17 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='true')
     
     joystick_node = Node(
-        package="joy",
-        executable="joy_node",
-          parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
-        output="screen",
-    )
+            package='joy_linux',
+            executable='joy_linux_node',
+            name='joy_linux_node',
+            output='screen',
+            parameters=[{
+                'use_sim_time': LaunchConfiguration("use_sim_time"),
+                'dev': '/dev/input/js0',
+                'deadzone': 0.05,
+                'autorepeat_rate': 20.0
+            }]
+        )
     
     waregv_controller = Node(
         package="waregv_controller",
