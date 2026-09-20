@@ -41,6 +41,8 @@ HOME_DIR = os.path.expanduser("~")
 SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
 WEB_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "web")
 HTML_FILE_PATH = os.path.join(WEB_DIR, "index.html")
+LOG_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
 
 
 def euler_yaw_to_quaternion(yaw_val: float, is_degrees: bool = False):
@@ -74,6 +76,7 @@ class CommanderRestAPINode(Node):
 
         self.active_processes = []
         self.launch_threads = []
+        self.launch_log_handles = {}
         self.nav_events = []
         self.nav_event_pub = self.create_publisher(String, "/nav_ui_events", 20)
         self.mode_lock = threading.Lock()
@@ -94,6 +97,11 @@ class CommanderRestAPINode(Node):
         self.create_subscription(Path, "/plan", self._plan_cb, 10)
         self.create_subscription(OccupancyGrid, "/map", self._map_cb, 5)
         self.create_subscription(LaserScan, "/scan", self._scan_cb, 20)
+        self.scan_count = 0
+        self.normalized_scan_count = 0
+        self.last_normalized_scan_time = 0.0
+        self.map_count = 0
+        self.create_timer(5.0, self._mapping_health_check)
 
         self.get_logger().info("Commander REST API Node initialized.")
 
@@ -118,9 +126,11 @@ class CommanderRestAPINode(Node):
 
     def _map_cb(self, msg):
         self.last_map = msg
+        self.map_count += 1
 
     def _scan_cb(self, msg: LaserScan):
-        """Normalize YDLIDAR X2 scans to a fixed 252-beam scan."""
+        """Normalize YDLIDAR X2 scans to exactly 252 beams for SLAM Toolbox."""
+        self.scan_count += 1
         target = 252
         src = list(msg.ranges)
         n = len(src)
@@ -170,6 +180,21 @@ class CommanderRestAPINode(Node):
         out_msg.ranges = out
         out_msg.intensities = intensities
         self.scan_normalized_pub.publish(out_msg)
+        self.normalized_scan_count += 1
+        self.last_normalized_scan_time = time.monotonic()
+
+    def _mapping_health_check(self):
+        if self.requested_mode not in ("slam", "slam_update"):
+            return
+        age = (time.monotonic() - self.last_normalized_scan_time) if self.last_normalized_scan_time else None
+        if self.scan_count == 0:
+            self.get_logger().warning("Mapping health: no /scan messages received.")
+        elif age is not None and age > 3.0:
+            self.get_logger().warning(f"Mapping health: /scan_normalized stale ({age:.1f}s).")
+        elif self.scan_normalized_pub.get_subscription_count() == 0:
+            self.get_logger().warning("Mapping health: /scan_normalized has no subscribers; SLAM Toolbox is not connected to the normalized scan.")
+        if self.map_count == 0 and self.scan_count > 0:
+            self.get_logger().warning("Mapping health: /scan is active but no /map has been received yet.")
 
     def load_map_from_yaml(self, map_yaml_path: str):
         while not self.load_map_client.wait_for_service(timeout_sec=1.0):
@@ -265,33 +290,56 @@ class CommanderRestAPINode(Node):
             for line in iter(proc.stdout.readline, ""):
                 if not line:
                     break
-                self.get_logger().info(f"[{label}] {line.rstrip()}")
+                text_line = line.rstrip("\n")
+                self.get_logger().info(f"[{label}] {text_line}")
+                fh = self.launch_log_handles.get(label)
+                if fh:
+                    try:
+                        fh.write(text_line + "\n")
+                        fh.flush()
+                    except Exception:
+                        pass
                 self._parse_launch_line(line)
         except Exception as exc:
             self.get_logger().warning(f"Launch output reader failed for {label}: {exc}")
+        finally:
+            fh = self.launch_log_handles.pop(label, None)
+            if fh:
+                try:
+                    fh.write("===== %s process stream ended %s =====\n" % (label, time.strftime("%Y-%m-%d %H:%M:%S")))
+                    fh.close()
+                except Exception:
+                    pass
 
     def _make_mapping_wrapper(self):
-        """Create a launch wrapper that globally remaps SLAM scan input."""
+        """Launch the existing WareGV mapping launch with SLAM scan remapped to /scan_normalized."""
         share = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "waregv_mapping", "share", "waregv_mapping")
         original = os.path.join(share, "launch", "mapping.launch.py")
         wrapper = os.path.join("/tmp", "waregv_mapping_normalized.launch.py")
+        if not os.path.exists(original):
+            self.get_logger().error(f"Mapping launch not found: {original}")
+            return None
         code = """from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import SetRemap
 
+MAPPING_LAUNCH = %r
+
 def generate_launch_description():
     return LaunchDescription([
         GroupAction(actions=[
-            SetRemap(src="/scan", dst="/scan_normalized"),
             SetRemap(src="scan", dst="/scan_normalized"),
-            IncludeLaunchDescription(PythonLaunchDescriptionSource(r"%s")),
+            SetRemap(src="/scan", dst="/scan_normalized"),
+            IncludeLaunchDescription(PythonLaunchDescriptionSource(MAPPING_LAUNCH)),
         ])
     ])
 """ % original
         try:
             with open(wrapper, "w", encoding="utf-8") as f:
                 f.write(code)
+            self.get_logger().info(f"Generated normalized SLAM launch: {wrapper}")
+            self.get_logger().info(f"Mapping launch source: {original}")
             return wrapper
         except Exception as exc:
             self.get_logger().error(f"Could not create mapping wrapper: {exc}")
@@ -303,9 +351,35 @@ def generate_launch_description():
             return self._start_launch_file(wrapper, label="SLAM")
         return self._start_launch("waregv_mapping", "mapping.launch.py", label="SLAM")
 
+    def _log_path_for_label(self, label):
+        key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (label or "ros2_launch").lower())
+        if key == "slam":
+            key = "slam"
+        elif key == "nav2":
+            key = "nav2"
+        return os.path.join(LOG_DIR, f"{key}.log")
+
+    def _open_launch_log(self, label):
+        path = self._log_path_for_label(label)
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            f = open(path, "a", encoding="utf-8", buffering=1)
+            f.write("\n===== %s %s =====\n" % (label, time.strftime("%Y-%m-%d %H:%M:%S")))
+            old = self.launch_log_handles.pop(label, None)
+            if old:
+                try: old.close()
+                except Exception: pass
+            self.launch_log_handles[label] = f
+            self.get_logger().info(f"[{label}] persistent log: {path}")
+            return f
+        except Exception as exc:
+            self.get_logger().error(f"[{label}] could not open persistent log: {exc}")
+            return None
+
     def _start_launch_file(self, launch_path, args=(), label="ros2-launch"):
         command, env = self._ros_launch_command_path(launch_path, *args)
         self.get_logger().info("Starting: " + " ".join(command))
+        self._open_launch_log(label)
         proc = subprocess.Popen(command, env=env, preexec_fn=os.setsid, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         self.active_processes.append(proc)
         t = threading.Thread(target=self._read_launch_output, args=(proc, label), daemon=True)
@@ -325,6 +399,7 @@ def generate_launch_description():
     def _start_launch(self, package, launch_file, args=(), label="ros2-launch"):
         command, env = self._ros_launch_command(package, launch_file, *args)
         self.get_logger().info("Starting: " + " ".join(command))
+        self._open_launch_log(label)
         proc = subprocess.Popen(
             command,
             env=env,
@@ -364,6 +439,13 @@ def generate_launch_description():
                     pass
         self.active_processes.clear()
         self.launch_threads.clear()
+        for label, fh in list(self.launch_log_handles.items()):
+            try:
+                fh.write("===== %s process stopped %s =====\n" % (label, time.strftime("%Y-%m-%d %H:%M:%S")))
+                fh.close()
+            except Exception:
+                pass
+        self.launch_log_handles.clear()
 
     def detect_mode(self):
         names = [n.lower() for n in self.get_node_names()]
