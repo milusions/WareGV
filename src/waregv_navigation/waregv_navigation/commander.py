@@ -19,7 +19,8 @@ class CommanderNode(Node):
     Bridge between the REST/web interface and Nav2 Simple Commander.
 
     Important:
-      * BasicNavigator is itself a ROS node and MUST be added to the executor.
+      * BasicNavigator is itself a ROS node and MUST NOT be added to the same executor
+        if its methods (which spin internally) are called concurrently.
       * Navigation work is done in worker threads so ROS callbacks do not block.
       * AMCL is not hard-coded. Nav2 may be using AMCL, slam_toolbox, or another
         localization node depending on the launched system.
@@ -52,6 +53,7 @@ class CommanderNode(Node):
         self.goal_lock = threading.Lock()
         self.goal_running = False
         self.shutdown_requested = False
+        self.abort_requested = False  # Flag for safely aborting from the worker thread
 
         self.get_logger().info(
             "Nav2 Commander is running: /nav_to_pose, /follow_waypoints, /abort"
@@ -166,20 +168,19 @@ class CommanderNode(Node):
     def _end_goal(self):
         with self.goal_lock:
             self.goal_running = False
+            self.abort_requested = False
 
     def monitor_task(self, max_duration_sec=120.0, label="NAVIGATION"):
         """
         Monitor a BasicNavigator action.
-
-        The navigator node is in the MultiThreadedExecutor, so action feedback
-        and result callbacks continue to be processed while this worker waits.
         """
         start = time.monotonic()
         last_log = 0.0
 
         while not self.navigator.isTaskComplete():
-            if self.shutdown_requested:
+            if self.shutdown_requested or getattr(self, 'abort_requested', False):
                 self.navigator.cancelTask()
+                self.abort_requested = False
                 break
 
             now = time.monotonic()
@@ -337,11 +338,9 @@ class CommanderNode(Node):
 
     def abort_mission(self):
         self.get_logger().warning("Aborting current navigation mission...")
-        try:
-            self.navigator.cancelTask()
-        except Exception as exc:
-            self.get_logger().error(f"Could not cancel Nav2 task: {exc}")
-        self.publish_status("ABORTED")
+        # Signal the worker thread to safely cancel the task
+        self.abort_requested = True
+        self.publish_status("ABORT_REQUESTED")
 
     def handle_save_map(self, msg: String):
         map_filename = msg.data if msg.data else "my_map"
@@ -378,10 +377,9 @@ def main():
     commander = CommanderNode()
     executor = MultiThreadedExecutor(num_threads=4)
 
-    # CRITICAL: BasicNavigator is a Node. The old code only added commander,
-    # so BasicNavigator's action/service callbacks were not being spun.
+    # BasicNavigator manages its own spinning internally when its methods are called.
+    # Do NOT add it to the global executor to avoid concurrent wait-set exceptions.
     executor.add_node(commander)
-    executor.add_node(commander.navigator)
 
     try:
         executor.spin()
