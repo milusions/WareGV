@@ -4,6 +4,7 @@ import math
 import os
 import signal
 import subprocess
+import collections
 import shutil
 import threading
 import time
@@ -12,6 +13,9 @@ import shutil
 from typing import List, Tuple, Optional
 
 import rclpy
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import LaserScan
+from rcl_interfaces.msg import Log
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, PoseArray, Pose
 from nav_msgs.msg import Odometry, Path, OccupancyGrid
@@ -56,6 +60,21 @@ def quaternion_to_yaw(q):
     )
 
 
+# Nodes that MUST exist for a stack to be considered healthy. `ros2 launch`
+# stays alive when one node inside it crashes, so poll() on the launch process
+# alone can never detect a dead slam_toolbox / bt_navigator.
+STACK_NODES = {
+    "mapping": ("slam_toolbox",),
+    "navigation": ("bt_navigator", "controller_server", "planner_server"),
+}
+STACK_GRACE_SEC = 45.0       # time a stack gets to bring its nodes up
+STACK_DEAD_SEC = 12.0        # nodes missing this long => restart
+MAP_STALL_SEC = 40.0         # robot moving + scans flowing but /map frozen
+RESTART_WINDOW_SEC = 180.0
+MAX_RESTARTS = 4
+AUTORESTART_STALL = os.environ.get("WAREGV_AUTORESTART_STALL", "0") == "1"
+
+
 class CommanderRestAPINode(Node):
     def __init__(self):
         super().__init__("commander_rest_api_node")
@@ -91,6 +110,19 @@ class CommanderRestAPINode(Node):
         self.create_subscription(Path, "/plan", self._plan_cb, 10)
         self.create_subscription(OccupancyGrid, "/map", self._map_cb, 5)
 
+        # ---- supervision / diagnostics state
+        self.stacks = {}                       # tag -> dict(cmd, proc, started, restarts[])
+        self.requested_map = ""
+        self.map_wall = 0.0                    # wall time of last /map
+        self.scan_wall = 0.0
+        self.moving_wall = 0.0                 # last time odom speed > 0.05
+        self.health = {"mapping": "OFF", "navigation": "OFF", "slam_map": "N/A"}
+        self.rosout_ring = collections.deque(maxlen=300)
+        self.create_subscription(LaserScan, "/scan", self._scan_cb, qos_profile_sensor_data)
+        self.create_subscription(Log, "/rosout", self._rosout_cb, 50)
+        self._stall_since = None
+        threading.Thread(target=self._supervisor_loop, daemon=True, name="stack-supervisor").start()
+
         self.get_logger().info("Commander REST API Node initialized.")
 
     def _status_cb(self, msg):
@@ -105,6 +137,9 @@ class CommanderRestAPINode(Node):
 
     def _odom_cb(self, msg):
         self.last_odom = msg
+        v = msg.twist.twist
+        if abs(v.linear.x) > 0.05 or abs(v.angular.z) > 0.1:
+            self.moving_wall = time.monotonic()
 
     def _joint_cb(self, msg):
         self.last_joint = msg
@@ -114,6 +149,16 @@ class CommanderRestAPINode(Node):
 
     def _map_cb(self, msg):
         self.last_map = msg
+        self.map_wall = time.monotonic()
+
+    def _scan_cb(self, _msg):
+        self.scan_wall = time.monotonic()
+
+    def _rosout_cb(self, msg):
+        n = msg.name or ""
+        if msg.level >= 30 and any(k in n for k in ("slam", "bt_navigator", "controller", "planner",
+                                                     "behavior", "lifecycle", "amcl", "map_server")):
+            self.rosout_ring.append({"t": time.time(), "lvl": int(msg.level), "node": n, "msg": msg.msg[:300]})
 
     def load_map_from_yaml(self, map_yaml_path: str):
         while not self.load_map_client.wait_for_service(timeout_sec=1.0):
@@ -145,46 +190,134 @@ class CommanderRestAPINode(Node):
                        "smoother_server", "velocity_smoother", "lifecycle_manager",
                        "map_server", "amcl", "mapping.launch", "navigation.launch")
 
-    def kill_active_systems(self):
-        procs = list(self.active_processes)
-        self.active_processes.clear()
-        for p in procs:
+    def _stop_proc(self, p):
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGINT)
+        except Exception:
+            return
+        try:
+            p.wait(timeout=8)
+        except Exception:
             try:
-                os.killpg(os.getpgid(p.pid), signal.SIGINT)
+                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                p.wait(timeout=3)
             except Exception:
                 pass
-        for p in procs:
-            try:
-                p.wait(timeout=6)
-            except Exception:
-                try:
-                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-                except Exception:
-                    pass
+
+    def kill_active_systems(self):
+        stacks, self.stacks = self.stacks, {}      # supervisor sees nothing to restart
+        for st in stacks.values():
+            self._stop_proc(st["proc"])
+        self.active_processes.clear()
         # Orphans (previous server run / manual terminal) keep node names busy.
         for pat in self._STACK_PATTERNS:
             subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
+        self.health.update({"mapping": "OFF", "navigation": "OFF", "slam_map": "N/A"})
+
+    def _launch_proc(self, cmd, tag):
+        log_path = f"/tmp/waregv_{tag}.log"
+        logf = open(log_path, "a")
+        logf.write(f"\n===== {time.strftime('%F %T')} launching: {' '.join(cmd)} =====\n")
+        logf.flush()
+        return subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, env=os.environ.copy(),
+                                start_new_session=True)
 
     def _spawn(self, cmd, tag):
-        """Start a ros2 launch with logging + early-death detection."""
-        log_path = f"/tmp/waregv_{tag}.log"
-        logf = open(log_path, "w")
-        self.get_logger().info(f"Launching {' '.join(cmd)}  (log: {log_path})")
-        p = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                             stdin=subprocess.DEVNULL, env=os.environ.copy(),
-                             start_new_session=True)
+        """Start a launch file and register it with the supervisor."""
+        self.get_logger().info(f"Launching {' '.join(cmd)}  (log: /tmp/waregv_{tag}.log)")
+        p = self._launch_proc(cmd, tag)
+        self.stacks[tag] = {"cmd": cmd, "proc": p, "started": time.monotonic(),
+                            "missing_since": None, "restarts": []}
         self.active_processes.append(p)
-
-        def watch():
-            code = p.wait()
-            if p in self.active_processes:
-                try:
-                    tail = open(log_path).read()[-800:]
-                except Exception:
-                    tail = ""
-                self.get_logger().error(f"{tag} launch EXITED code={code}. Tail:\n{tail}")
-        threading.Thread(target=watch, daemon=True, name=f"watch-{tag}").start()
+        self.health[tag] = "STARTING"
         return p
+
+    # ---- supervisor ---------------------------------------------------
+    def _live_nodes(self):
+        try:
+            return [n.lower() for n in self.get_node_names()]
+        except Exception:
+            return []
+
+    def _restart_stack(self, tag, reason):
+        st = self.stacks.get(tag)
+        if not st:
+            return
+        now = time.monotonic()
+        st["restarts"] = [t for t in st["restarts"] if now - t < RESTART_WINDOW_SEC]
+        tail = ""
+        try:
+            tail = open(f"/tmp/waregv_{tag}.log").read()[-600:]
+        except Exception:
+            pass
+        if len(st["restarts"]) >= MAX_RESTARTS:
+            self.health[tag] = "FAILED"
+            self.get_logger().error(f"[{tag}] giving up after {MAX_RESTARTS} restarts. Last reason: {reason}\n{tail}")
+            return
+        self.get_logger().error(f"[{tag}] {reason} -> restarting. Log tail:\n{tail}")
+        self.health[tag] = "RESTARTING"
+        self._stop_proc(st["proc"])
+        for pat in (STACK_NODES.get(tag, ()) ):
+            subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
+        time.sleep(2.0)
+        st["restarts"].append(now)
+        st["proc"] = self._launch_proc(st["cmd"], tag)
+        st["started"] = time.monotonic()
+        st["missing_since"] = None
+        self.active_processes = [st2["proc"] for st2 in self.stacks.values()]
+        self.health[tag] = "STARTING"
+
+    def _supervisor_loop(self):
+        while rclpy.ok():
+            time.sleep(2.0)
+            try:
+                if not self.mode_lock.acquire(blocking=False):
+                    continue                     # a mode switch is in progress
+                try:
+                    self._supervise_once()
+                finally:
+                    self.mode_lock.release()
+            except Exception as e:
+                self.get_logger().error(f"supervisor error: {e}")
+
+    def _supervise_once(self):
+        nodes = self._live_nodes()
+        now = time.monotonic()
+        for tag, st in list(self.stacks.items()):
+            age = now - st["started"]
+            if st["proc"].poll() is not None:
+                self._restart_stack(tag, f"launch process exited code={st['proc'].returncode}")
+                continue
+            need = STACK_NODES.get(tag, ())
+            missing = [n for n in need if not any(n in x for x in nodes)]
+            if not missing:
+                st["missing_since"] = None
+                if self.health.get(tag) != "FAILED":
+                    self.health[tag] = "OK"
+                continue
+            if age < STACK_GRACE_SEC:
+                continue
+            st["missing_since"] = st["missing_since"] or now
+            if now - st["missing_since"] > STACK_DEAD_SEC:
+                self._restart_stack(tag, f"node(s) died/missing: {missing}")
+
+        # SLAM freshness: robot moving + scans flowing, but /map frozen.
+        m = self.stacks.get("mapping")
+        if m and self.health.get("mapping") == "OK":
+            moving = now - self.moving_wall < 10.0
+            scans = now - self.scan_wall < 3.0
+            stale = (now - self.map_wall) if self.map_wall else 1e9
+            if moving and scans and stale > MAP_STALL_SEC:
+                self.health["slam_map"] = "STALLED"
+                recent = [r for r in list(self.rosout_ring)[-6:] if "slam" in r["node"]]
+                self.get_logger().error(
+                    f"SLAM STALLED: /map unchanged for {stale:.0f}s while robot moves. "
+                    f"Recent slam warnings: {recent}")
+                if AUTORESTART_STALL and (now - m["started"]) > STACK_GRACE_SEC:
+                    self._restart_stack("mapping", "map stalled")
+            else:
+                self.health["slam_map"] = "OK"
 
     def detect_mode(self):
         names = [n.lower() for n in self.get_node_names()]
@@ -214,6 +347,7 @@ class CommanderRestAPINode(Node):
             raise ValueError("A saved map must be selected for this mode")
         with self.mode_lock:
             self.requested_mode = mode
+            self.requested_map = map_name
             self._switch_system_mode_locked(mode, map_name)
 
     def _switch_system_mode_locked(self, mode, map_name):
@@ -907,6 +1041,26 @@ def http_maps():
     return {"maps": maps}
 
 
+@app.get("/system/diagnostics")
+def http_diagnostics():
+    n = api_node
+    now = time.monotonic()
+    nodes = n._live_nodes()
+    return {
+        "mode": n.detect_mode(), "requested": n.requested_mode,
+        "health": dict(n.health),
+        "stacks": {t: {"alive": st["proc"].poll() is None, "pid": st["proc"].pid,
+                       "restarts_in_window": len(st["restarts"]),
+                       "uptime_s": round(now - st["started"], 1)} for t, st in n.stacks.items()},
+        "expected_nodes_present": {t: {x: any(x in y for y in nodes) for x in STACK_NODES[t]}
+                                   for t in n.stacks if t in STACK_NODES},
+        "map_age_s": round(now - n.map_wall, 1) if n.map_wall else None,
+        "scan_age_s": round(now - n.scan_wall, 1) if n.scan_wall else None,
+        "moving_recently": now - n.moving_wall < 10.0,
+        "recent_warnings": list(n.rosout_ring)[-25:],
+    }
+
+
 @app.get("/system/log/{tag}")
 def http_launch_log(tag: str):
     if tag not in ("mapping", "navigation"):
@@ -987,7 +1141,10 @@ def main():
     global api_node
     rclpy.init()
     api_node = CommanderRestAPINode()
-    ros_thread = threading.Thread(target=rclpy.spin, args=(api_node,), daemon=True)
+    from rclpy.executors import MultiThreadedExecutor
+    _ex = MultiThreadedExecutor(num_threads=4)
+    _ex.add_node(api_node)
+    ros_thread = threading.Thread(target=_ex.spin, daemon=True)
     ros_thread.start()
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000)

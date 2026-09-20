@@ -30,6 +30,8 @@ class CommanderNode(Node):
         super().__init__(node_name)
 
         self.navigator = BasicNavigator()
+        self.nav_lock = threading.RLock()
+        self.nav2_ready_until = 0.0
 
         self.create_subscription(
             PoseStamped, "/nav_to_pose", self.handle_nav_to_pose, 10
@@ -78,8 +80,14 @@ class CommanderNode(Node):
         self.feedback_pub.publish(msg)
 
     def set_initial_pose(self, msg: PoseWithCovarianceStamped):
-        self.navigator.setInitialPose(msg)
-        self.publish_status("INITIAL_POSE_SET")
+        def work():
+            try:
+                with self.nav_lock:
+                    self.navigator.setInitialPose(msg)
+                self.publish_status("INITIAL_POSE_SET")
+            except Exception as exc:
+                self.get_logger().error(f"setInitialPose failed: {exc}")
+        threading.Thread(target=work, daemon=True, name="initial-pose").start()
 
     def _service_exists(self, service_name: str) -> bool:
         try:
@@ -117,6 +125,8 @@ class CommanderNode(Node):
         your previous commander printed:
             amcl/get_state service not available, waiting...
         """
+        if time.monotonic() < self.nav2_ready_until and self._service_exists("/bt_navigator/get_state"):
+            return True
         self.get_logger().info("Waiting for Nav2 to become active...")
 
         localizer = None
@@ -141,10 +151,12 @@ class CommanderNode(Node):
         try:
             # localizer=None is intentional: do NOT force /amcl/get_state.
             # Nav2 still waits for bt_navigator through BasicNavigator.
-            self.navigator.waitUntilNav2Active(
-                localizer=localizer,
-                navigator="bt_navigator",
-            )
+            with self.nav_lock:
+                self.navigator.waitUntilNav2Active(
+                    localizer=localizer,
+                    navigator="bt_navigator",
+                )
+            self.nav2_ready_until = time.monotonic() + 20.0
             self.get_logger().info(
                 f"Nav2 is active (localizer={localizer or 'not specified'})."
             )
@@ -177,16 +189,20 @@ class CommanderNode(Node):
         start = time.monotonic()
         last_log = 0.0
 
-        while not self.navigator.isTaskComplete():
-            if self.shutdown_requested or getattr(self, 'abort_requested', False):
-                self.navigator.cancelTask()
+        while True:
+            with self.nav_lock:
+                if self.navigator.isTaskComplete():
+                    break
+            if self.shutdown_requested or self.abort_requested:
+                self._safe_cancel()
                 self.abort_requested = False
                 break
 
             now = time.monotonic()
 
             if now - last_log >= 1.0:
-                feedback = self.navigator.getFeedback()
+                with self.nav_lock:
+                    feedback = self.navigator.getFeedback()
                 if feedback is not None:
                     try:
                         eta = (
@@ -210,12 +226,13 @@ class CommanderNode(Node):
                 self.get_logger().warning(
                     f"[{label}] exceeded {max_duration_sec:.0f}s. Aborting."
                 )
-                self.navigator.cancelTask()
+                self._safe_cancel()
                 break
 
             time.sleep(0.05)
 
-        result = self.navigator.getResult()
+        with self.nav_lock:
+            result = self.navigator.getResult()
 
         if result == TaskResult.SUCCEEDED:
             status = f"{label}_SUCCEEDED"
@@ -226,6 +243,25 @@ class CommanderNode(Node):
 
         self.publish_status(status)
         return result
+
+    def _safe_cancel(self, wait_sec=5.0):
+        """Cancel and wait (bounded) so 'Failed to cancel action server' cannot wedge the worker."""
+        try:
+            with self.nav_lock:
+                self.navigator.cancelTask()
+        except Exception as exc:
+            self.get_logger().warning(f"cancelTask raised: {exc}")
+            return
+        end = time.monotonic() + wait_sec
+        while time.monotonic() < end:
+            try:
+                with self.nav_lock:
+                    if self.navigator.isTaskComplete():
+                        return
+            except Exception:
+                return
+            time.sleep(0.1)
+        self.get_logger().warning("Cancel not confirmed within timeout; continuing.")
 
     def handle_nav_to_pose(self, msg: PoseStamped):
         if not self._begin_goal():
@@ -252,7 +288,8 @@ class CommanderNode(Node):
                 f"y={msg.pose.position.y:.3f}"
             )
 
-            self.navigator.goToPose(msg)
+            with self.nav_lock:
+                self.navigator.goToPose(msg)
             self.monitor_task(label="NAVIGATION")
 
         except Exception as exc:
@@ -317,7 +354,8 @@ class CommanderNode(Node):
                     f"y={goal.pose.position.y:.3f}"
                 )
 
-            self.navigator.followWaypoints(waypoints)
+            with self.nav_lock:
+                self.navigator.followWaypoints(waypoints)
             self.monitor_task(
                 max_duration_sec=max(120.0, 90.0 * count),
                 label=f"WAYPOINTS({count})",
@@ -343,6 +381,9 @@ class CommanderNode(Node):
         self.publish_status("ABORT_REQUESTED")
 
     def handle_save_map(self, msg: String):
+        threading.Thread(target=self._save_map_worker, args=(msg,), daemon=True, name="save-map").start()
+
+    def _save_map_worker(self, msg: String):
         map_filename = msg.data if msg.data else "my_map"
         self.publish_status(f"SAVING_MAP:{map_filename}")
 
@@ -390,7 +431,7 @@ def main():
     finally:
         commander.shutdown_requested = True
         try:
-            commander.navigator.cancelTask()
+            commander._safe_cancel(2.0)
         except Exception:
             pass
 
