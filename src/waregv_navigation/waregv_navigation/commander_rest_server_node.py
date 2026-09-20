@@ -71,6 +71,9 @@ class ModeRequest(BaseModel):
     mode: str
     map_name: str = "map"
 
+class MapRequest(BaseModel):
+    map_name: str
+
 @app.get("/system/mode")
 def http_get_mode():
     return {
@@ -88,7 +91,7 @@ def http_switch_mode(req: ModeRequest):
         raise HTTPException(400, str(e))
 
 @app.post("/system/save_map")
-def http_save_map(req: ModeRequest):
+def http_save_map(req: MapRequest):
     api_node.manual_manager.save_map(req.map_name)
     return {"status": "saving_initiated"}
 
