@@ -18,7 +18,7 @@ class AutonomousDriveManager:
         os.makedirs(LOG_DIR, exist_ok=True)
         self.log_file_path = os.path.join(LOG_DIR, "autonomous_debug.log")
 
-    def start_slam_update_mode(self, map_name: str, manual_manager):
+    def start_slam_update_mode(self, map_name: str, manual_manager, load_existing: bool = False):
         """Order matters: SLAM must publish map->odom BEFORE Nav2 activates its
         global costmap, otherwise lifecycle bringup times out and aborts."""
         def worker():
@@ -33,7 +33,7 @@ class AutonomousDriveManager:
 
                 # 2) Load the saved pose graph so SLAM continues on the existing map
                 base = os.path.join(SLAM_MAP_ROOT, map_name, map_name)
-                if os.path.exists(base + ".posegraph") and os.path.exists(base + ".data"):
+                if load_existing and os.path.exists(base + ".posegraph") and os.path.exists(base + ".data"):
                     if self._wait_for_ros_service("/slam_toolbox/deserialize_map", 30):
                         # match_type 1 = START_AT_FIRST_NODE (robot must start at mapping origin)
                         req = "{filename: '" + base.replace("'", "''") + "', match_type: 1}"
@@ -45,10 +45,11 @@ class AutonomousDriveManager:
                             f"deserialize_map rc={res.returncode} out={res.stdout.strip()} err={res.stderr.strip()}")
                     else:
                         self.node.get_logger().error("deserialize_map service not available")
+                elif load_existing:
+                    self.node.get_logger().error(f"Missing {base}.posegraph/.data - cannot update this map")
+                    return
                 else:
-                    self.node.get_logger().warn(
-                        f"No {base}.posegraph/.data - SLAM will start a NEW map. "
-                        "Save the map from SLAM mapping to get these files.")
+                    self.node.get_logger().info("Starting SLAM with a fresh map")
 
                 # 3) Wait until the map frame really exists (/map published)
                 if not self._wait_for_topic("/map", 30):

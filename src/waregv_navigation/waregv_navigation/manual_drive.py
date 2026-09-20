@@ -40,13 +40,17 @@ class ManualDriveManager:
                 os.makedirs(map_dir, exist_ok=True)
                 base = os.path.join(map_dir, name)
                 
-                self._run_command(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base])
+                r1 = self._run_command(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base])
+                self.node.get_logger().info(f"map_saver rc={r1.returncode} {r1.stderr.strip()[-200:]}")
                 if self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
                     req = "{filename: '" + base.replace("'", "''") + "'}"
-                    self._run_command([
+                    r2 = self._run_command([
                         "ros2", "service", "call", "/slam_toolbox/serialize_map",
                         "slam_toolbox/srv/SerializePoseGraph", req
                     ])
+                    self.node.get_logger().info(f"serialize_map rc={r2.returncode} out={r2.stdout.strip()[-200:]}")
+                else:
+                    self.node.get_logger().error("serialize_map service unavailable - no .posegraph/.data saved (SLAM not running?)")
             except Exception as e:
                 self.node.get_logger().error(f"Map save error: {e}")
         threading.Thread(target=worker, daemon=True).start()

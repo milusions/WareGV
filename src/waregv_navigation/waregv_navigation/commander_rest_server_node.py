@@ -140,6 +140,14 @@ class CommanderRestAPINode(Node):
                 return None
 
     def switch_system_mode(self, mode: str, map_name: str):
+        if mode == "nav":
+            base = os.path.join(SLAM_MAP_ROOT, map_name, map_name)
+            missing = [e for e in (".posegraph", ".data") if not os.path.exists(base + e)]
+            if missing:
+                raise ValueError(
+                    f"Map '{map_name}' has no SLAM pose graph (missing {', '.join(missing)}). "
+                    "Map update needs .posegraph + .data (created by Save Map in a SLAM mode). "
+                    "Upload them with the map, or re-map and save.")
         with self.mode_lock:
             self.requested_mode = mode
             self.manual_manager.kill_processes()
@@ -150,8 +158,10 @@ class CommanderRestAPINode(Node):
                 self.get_logger().info("Switched to Manual Mode.")
             elif mode == "slam":
                 self.manual_manager.start_slam_mapping()
-            elif mode == "slam_update":
-                self.autonomous_manager.start_slam_update_mode(map_name, self.manual_manager)
+            elif mode == "slam_update":   # autonomous + NEW mapping from scratch
+                self.autonomous_manager.start_slam_update_mode(map_name, self.manual_manager, load_existing=False)
+            elif mode == "nav":           # autonomous + UPDATE an existing (uploaded) map
+                self.autonomous_manager.start_slam_update_mode(map_name, self.manual_manager, load_existing=True)
             else:
                 raise ValueError(f"Unknown mode '{mode}'")
 
@@ -159,8 +169,8 @@ class CommanderRestAPINode(Node):
         names = [n.lower() for n in self.get_node_names()]
         has_slam = any("slam_toolbox" in n or n == "slam" for n in names)
         has_nav = any("bt_navigator" in n for n in names)
-        if self.requested_mode == "slam_update" and has_slam and has_nav:
-            return "slam_update"
+        if self.requested_mode in ("slam_update", "nav") and has_slam and has_nav:
+            return self.requested_mode
         if self.requested_mode == "slam" and has_slam:
             return "slam"
         if self.requested_mode == "nav" and has_nav:
@@ -334,7 +344,9 @@ def http_maps():
             d = os.path.join(root, name)
             if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.yaml")):
                 maps.append(name)
-    return {"maps": maps}
+    updatable = [m for m in maps if os.path.exists(os.path.join(root, m, f"{m}.posegraph"))
+                 and os.path.exists(os.path.join(root, m, f"{m}.data"))]
+    return {"maps": maps, "updatable": updatable}
 
 @app.post("/maps")
 def http_create_map(req: MapRequest):
@@ -374,6 +386,26 @@ async def http_put_map_yaml(map_name: str, request: Request):
     with open(os.path.join(map_dir, f"{name}.yaml"), "w", encoding="utf-8") as f:
         f.write(text)
     return {"status": "success"}
+
+async def _put_map_binary(map_name: str, request: Request, ext: str):
+    name = safe_map_name(map_name)
+    map_dir = os.path.join(SLAM_MAP_ROOT, name)
+    if not os.path.isdir(map_dir):
+        raise HTTPException(404, f"Map not found: {name}")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, f"Empty {ext} body")
+    with open(os.path.join(map_dir, f"{name}{ext}"), "wb") as f:
+        f.write(data)
+    return {"status": "success"}
+
+@app.put("/maps/{map_name}/posegraph")
+async def http_put_map_posegraph(map_name: str, request: Request):
+    return await _put_map_binary(map_name, request, ".posegraph")
+
+@app.put("/maps/{map_name}/data")
+async def http_put_map_data(map_name: str, request: Request):
+    return await _put_map_binary(map_name, request, ".data")
 
 @app.get("/maps/{map_name}/pgm")
 def http_get_map_pgm(map_name: str):
