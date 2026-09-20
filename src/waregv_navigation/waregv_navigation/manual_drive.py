@@ -31,29 +31,32 @@ class ManualDriveManager:
         return self._start_launch("waregv_mapping", "mapping.launch.py", label="MANUAL_SLAM")
 
     def save_map(self, map_name: str):
-        def worker():
-            try:
-                name = (map_name or "").strip()
-                if not name:
-                    raise ValueError("Map name cannot be empty")
-                map_dir = os.path.join(SLAM_MAP_ROOT, name)
-                os.makedirs(map_dir, exist_ok=True)
-                base = os.path.join(map_dir, name)
-                
-                r1 = self._run_command(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base])
-                self.node.get_logger().info(f"map_saver rc={r1.returncode} {r1.stderr.strip()[-200:]}")
-                if self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
-                    req = "{filename: '" + base.replace("'", "''") + "'}"
-                    r2 = self._run_command([
-                        "ros2", "service", "call", "/slam_toolbox/serialize_map",
-                        "slam_toolbox/srv/SerializePoseGraph", req
-                    ])
-                    self.node.get_logger().info(f"serialize_map rc={r2.returncode} out={r2.stdout.strip()[-200:]}")
-                else:
-                    self.node.get_logger().error("serialize_map service unavailable - no .posegraph/.data saved (SLAM not running?)")
-            except Exception as e:
-                self.node.get_logger().error(f"Map save error: {e}")
-        threading.Thread(target=worker, daemon=True).start()
+        """Synchronous. Saves .pgm/.yaml (map_saver) AND .posegraph/.data (slam_toolbox).
+        Returns list of files written; raises on failure."""
+        name = (map_name or "").strip()
+        if not name:
+            raise ValueError("Map name cannot be empty")
+        map_dir = os.path.join(SLAM_MAP_ROOT, name)
+        os.makedirs(map_dir, exist_ok=True)
+        base = os.path.join(map_dir, name)
+
+        r1 = self._run_command(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base])
+        self.node.get_logger().info(f"map_saver rc={r1.returncode} {r1.stderr.strip()[-200:]}")
+
+        if not self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
+            raise RuntimeError("slam_toolbox serialize_map service unavailable (is SLAM running?)")
+        req = "{filename: '" + base.replace("'", "''") + "'}"
+        r2 = self._run_command([
+            "ros2", "service", "call", "/slam_toolbox/serialize_map",
+            "slam_toolbox/srv/SerializePoseGraph", req
+        ])
+        self.node.get_logger().info(f"serialize_map rc={r2.returncode} out={r2.stdout.strip()[-200:]}")
+
+        written = [e for e in (".pgm", ".yaml", ".posegraph", ".data") if os.path.exists(base + e)]
+        missing = [e for e in (".pgm", ".yaml", ".posegraph", ".data") if e not in written]
+        if missing:
+            raise RuntimeError("Save incomplete, missing: " + ", ".join(missing))
+        return written
 
     def kill_processes(self):
         for p in list(self.active_processes):

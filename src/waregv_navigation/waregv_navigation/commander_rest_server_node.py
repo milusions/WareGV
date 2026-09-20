@@ -324,8 +324,12 @@ def http_load_map(req: MapRequest):
 
 @app.post("/system/save_map")
 def http_save_map(req: MapRequest):
-    api_node.manual_manager.save_map(req.map_name)
-    return {"status": "saving_initiated"}
+    name = safe_map_name(req.map_name)
+    try:
+        files = api_node.manual_manager.save_map(name)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    return {"status": "saved", "files": files}
 
 @app.post("/system/slam_update/load")
 def http_slam_update_load(req: MapRequest):
