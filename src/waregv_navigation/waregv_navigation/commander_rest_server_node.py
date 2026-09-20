@@ -4,8 +4,11 @@ import math
 import os
 import signal
 import subprocess
+import shutil
 import threading
 import time
+import re
+import shutil
 from typing import List, Tuple, Optional
 
 import rclpy
@@ -18,7 +21,7 @@ from tf2_ros import Buffer, TransformListener
 from ament_index_python.packages import get_package_share_directory
 from nav2_msgs.srv import LoadMap
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import uvicorn
@@ -188,22 +191,44 @@ class CommanderRestAPINode(Node):
             )
             self.active_processes.append(p)
         elif mode == "nav":
+            # Start Nav2 with the selected map name, then explicitly reload the
+            # selected YAML through map_server. This makes the dropdown selection
+            # authoritative even when navigation.launch.py has a hard-coded
+            # default map internally.
+            self.get_logger().info(f"Starting autonomous driving with selected map: {map_name}")
             p = subprocess.Popen(
                 ["ros2", "launch", "waregv_navigation", "navigation.launch.py",
                  "mapping_enable:=false", f"map_name:={map_name}"],
                 preexec_fn=os.setsid,
             )
             self.active_processes.append(p)
-            if last_pose:
-                threading.Thread(target=self.inject_amcl_pose, args=(last_pose,), daemon=True).start()
+            threading.Thread(
+                target=self._load_selected_nav_map,
+                args=(map_name, last_pose),
+                daemon=True,
+                name="selected-map-loader",
+            ).start()
+
         elif mode == "slam_update":
-            p1 = subprocess.Popen(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], preexec_fn=os.setsid)
-            p2 = subprocess.Popen(
-                ["ros2", "launch", "waregv_navigation", "navigation.launch.py", "mapping_enable:=true"],
+            # IMPORTANT: do not start Nav2 and a fresh SLAM session at the same
+            # time and hope the saved graph wins a race. First start SLAM
+            # Toolbox, wait for its deserialize service, and load the selected
+            # serialized graph. Only after that succeeds do we start Nav2.
+            self.get_logger().info(
+                f"Starting autonomous driving + map update from selected map: {map_name}"
+            )
+            p1 = subprocess.Popen(
+                ["ros2", "launch", "waregv_mapping", "mapping.launch.py"],
                 preexec_fn=os.setsid,
             )
-            self.active_processes.extend([p1, p2])
-            threading.Thread(target=self._load_slam_update_map, args=(map_name,), daemon=True).start()
+            self.active_processes.append(p1)
+
+            threading.Thread(
+                target=self._start_slam_update_after_load,
+                args=(map_name,),
+                daemon=True,
+                name="slam-update-loader",
+            ).start()
         # manual: processes have already been stopped
 
     def _map_base_path(self, map_name):
@@ -228,27 +253,88 @@ class CommanderRestAPINode(Node):
             time.sleep(0.5)
         return False
 
-    def _load_slam_update_map(self, map_name):
+    def _selected_map_yaml(self, map_name):
+        name = (map_name or "").strip()
+        if not name:
+            raise ValueError("Map name cannot be empty")
+        source = os.path.join(SLAM_MAP_ROOT, name, f"{name}.yaml")
+        if os.path.isfile(source):
+            return source
+        package = os.path.join(self._package_maps_root(), name, f"{name}.yaml")
+        if os.path.isfile(package):
+            return package
+        raise FileNotFoundError(f"Selected map YAML not found: {name}")
+
+    def _load_selected_nav_map(self, map_name, last_pose=None):
+        """Force Nav2 map_server to use exactly the map selected in the UI."""
         try:
-            base = self._map_base_path(map_name)
-            service = "/slam_toolbox/deserialize_map"
-            if not self._wait_for_ros_service(service, 60):
-                self.get_logger().error("SLAM Toolbox deserialize service unavailable")
-                return
-            req = (
-                "{filename: '" + base.replace("'", "''") +
-                "', match_type: 1, initial_pose: {position: {x: 0.0, y: 0.0, z: 0.0}, "
-                "orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
-            )
-            result = self._run_service_call(
-                ["ros2", "service", "call", service,
-                 "slam_toolbox/srv/DeserializePoseGraph", req],
-                timeout=60,
-            )
-            if result.returncode != 0:
-                self.get_logger().error("SLAM update load failed: " + (result.stderr or result.stdout))
+            yaml_path = self._selected_map_yaml(map_name)
+            self.get_logger().info(f"Loading selected Nav2 map: {yaml_path}")
+            if not self._wait_for_ros_service("/map_server/load_map", 45):
+                raise RuntimeError("/map_server/load_map service did not become available")
+            result = self.load_map_from_yaml(yaml_path)
+            if result.result != 0:
+                raise RuntimeError(f"map_server rejected '{yaml_path}' with result code {result.result}")
+            self.get_logger().info(f"Selected map '{map_name}' is now loaded by map_server")
+            if last_pose:
+                self.inject_amcl_pose(last_pose)
         except Exception as e:
-            self.get_logger().error(f"SLAM update load error: {e}")
+            self.get_logger().error(f"Selected map load failed for '{map_name}': {e}")
+
+    def _serialized_map_exists(self, map_name):
+        """Return whether SLAM Toolbox serialization files exist for this map."""
+        base = self._map_base_path(map_name)
+        # SLAM Toolbox versions commonly create .posegraph and .data files.
+        # Some versions use additional files, so require the posegraph/data
+        # pair rather than the PGM/YAML occupancy map alone.
+        return (os.path.isfile(base + ".posegraph") and os.path.isfile(base + ".data"))
+
+    def _deserialize_slam_map(self, map_name):
+        base = self._map_base_path(map_name)
+        if not self._serialized_map_exists(map_name):
+            raise FileNotFoundError(
+                f"Map '{map_name}' has no SLAM Toolbox serialized pose graph "
+                f"({base}.posegraph + {base}.data). Re-save the map while SLAM is running first."
+            )
+
+        service = "/slam_toolbox/deserialize_map"
+        if not self._wait_for_ros_service(service, 60):
+            raise RuntimeError("SLAM Toolbox deserialize service unavailable")
+
+        req = (
+            "{filename: '" + base.replace("'", "''") +
+            "', match_type: 1, initial_pose: {position: {x: 0.0, y: 0.0, z: 0.0}, "
+            "orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
+        )
+        result = self._run_service_call(
+            ["ros2", "service", "call", service,
+             "slam_toolbox/srv/DeserializePoseGraph", req],
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("SLAM Toolbox deserialize failed: " + (result.stderr or result.stdout).strip())
+        self.get_logger().info(f"SLAM Toolbox loaded serialized map '{map_name}'")
+
+    def _start_slam_update_after_load(self, map_name):
+        """Load the selected SLAM graph first, then bring up Nav2."""
+        try:
+            self._deserialize_slam_map(map_name)
+            p2 = subprocess.Popen(
+                ["ros2", "launch", "waregv_navigation", "navigation.launch.py",
+                 "mapping_enable:=true"],
+                preexec_fn=os.setsid,
+            )
+            self.active_processes.append(p2)
+            self.get_logger().info(
+                f"Autonomous driving + map update started from '{map_name}'"
+            )
+        except Exception as e:
+            self.get_logger().error(
+                f"SLAM update for '{map_name}' was not started: {e}"
+            )
+            # Do not silently leave a fresh mapping session running when the
+            # requested saved graph could not be loaded.
+            self.kill_active_systems()
 
     def inject_amcl_pose(self, transform):
         time.sleep(8)
@@ -264,6 +350,29 @@ class CommanderRestAPINode(Node):
         pose.pose.covariance[35] = 0.0685
         self.amcl_pose_pub.publish(pose)
 
+    def _package_maps_root(self):
+        """Return the maps directory used by the installed waregv_mapping package."""
+        return os.path.join(get_package_share_directory("waregv_mapping"), "maps")
+
+    def _sync_saved_map_to_package_share(self, map_name):
+        """
+        Keep the persistent/source map directory and the installed package map
+        directory in sync. The navigation launch uses the package-share maps
+        directory, while the REST API keeps saved maps in SLAM_MAP_ROOT.
+        """
+        src_dir = os.path.join(SLAM_MAP_ROOT, map_name)
+        dst_root = self._package_maps_root()
+        dst_dir = os.path.join(dst_root, map_name)
+        if not os.path.isdir(src_dir):
+            raise FileNotFoundError(f"Saved map directory does not exist: {src_dir}")
+        os.makedirs(dst_root, exist_ok=True)
+        os.makedirs(dst_dir, exist_ok=True)
+        for filename in os.listdir(src_dir):
+            src = os.path.join(src_dir, filename)
+            dst = os.path.join(dst_dir, filename)
+            if os.path.isfile(src):
+                shutil.copy2(src, dst)
+
     def save_map(self, map_name):
         def worker():
             try:
@@ -273,17 +382,39 @@ class CommanderRestAPINode(Node):
                 map_dir = os.path.join(SLAM_MAP_ROOT, name)
                 os.makedirs(map_dir, exist_ok=True)
                 base = os.path.join(map_dir, name)
-                self._run_service_call(
+
+                map_result = self._run_service_call(
                     ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base],
                     timeout=60,
                 )
-                if self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
-                    self._run_service_call(
-                        ["ros2", "service", "call", "/slam_toolbox/serialize_map",
-                         "slam_toolbox/srv/SerializePoseGraph",
-                         "{filename: '" + base.replace("'", "''") + "'}"],
-                        timeout=120,
+                if map_result.returncode != 0:
+                    raise RuntimeError(
+                        "map_saver_cli failed: " + (map_result.stderr or map_result.stdout).strip()
                     )
+
+                if not self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
+                    raise RuntimeError("/slam_toolbox/serialize_map service is not available")
+
+                serialize_result = self._run_service_call(
+                    ["ros2", "service", "call", "/slam_toolbox/serialize_map",
+                     "slam_toolbox/srv/SerializePoseGraph",
+                     "{filename: '" + base.replace("'", "''") + "'}"],
+                    timeout=120,
+                )
+                if serialize_result.returncode != 0:
+                    raise RuntimeError(
+                        "SLAM Toolbox map serialization failed: " +
+                        (serialize_result.stderr or serialize_result.stdout).strip()
+                    )
+
+                # Critical: navigation.launch.py resolves maps from the
+                # installed waregv_mapping/share/maps directory. Copy the
+                # newly saved YAML/PGM/pose-graph files there so the selected
+                # map can actually be loaded on the next mode switch.
+                self._sync_saved_map_to_package_share(name)
+                self.get_logger().info(
+                    f"Map '{name}' saved and synchronized to package-share maps."
+                )
             except Exception as e:
                 self.get_logger().error(f"Map save error: {e}")
         threading.Thread(target=worker, daemon=True).start()
@@ -366,6 +497,9 @@ class ModeRequest(BaseModel):
 class MapRequest(BaseModel):
     map_name: str
 
+class MapCreateRequest(BaseModel):
+    map_name: str
+
 class DriveRequest(BaseModel):
     linear: float
     angular: float
@@ -417,10 +551,22 @@ def http_switch_mode(req: ModeRequest):
 
 @app.post("/system/mode/load_map")
 def http_load_map(req: MapRequest):
-    maps_dir = os.path.join(get_package_share_directory("waregv_mapping"), "maps")
-    map_yaml = os.path.join(maps_dir, req.map_name, f"{req.map_name}.yaml")
+    # Saved maps are persisted under SLAM_MAP_ROOT and synchronized to the
+    # package-share directory after saving. Prefer the persistent location
+    # here so this endpoint can load maps immediately as well.
+    map_name = (req.map_name or "").strip()
+    if not map_name:
+        raise HTTPException(400, "Map name cannot be empty")
+    map_yaml = os.path.join(SLAM_MAP_ROOT, map_name, f"{map_name}.yaml")
     if not os.path.exists(map_yaml):
-        raise HTTPException(404, f"Map YAML not found at: {map_yaml}")
+        package_map_yaml = os.path.join(
+            get_package_share_directory("waregv_mapping"), "maps",
+            map_name, f"{map_name}.yaml"
+        )
+        if os.path.exists(package_map_yaml):
+            map_yaml = package_map_yaml
+        else:
+            raise HTTPException(404, f"Map YAML not found for '{map_name}'")
     try:
         response = api_node.load_map_from_yaml(map_yaml)
         if response.result == 0:
@@ -564,14 +710,178 @@ def http_map_info():
     }
 
 
+def _safe_map_name(map_name: str) -> str:
+    """Validate a user-facing map directory name and prevent path traversal."""
+    name = (map_name or "").strip()
+    if not name:
+        raise HTTPException(400, "Map name cannot be empty")
+    if len(name) > 80:
+        raise HTTPException(400, "Map name is too long")
+    if name in {".", ".."} or "/" in name or "\\" in name or "\x00" in name:
+        raise HTTPException(400, "Map name contains invalid path characters")
+    if not re.fullmatch(r"[A-Za-z0-9 _.-]+", name):
+        raise HTTPException(400, "Map name may contain only letters, numbers, spaces, _, -, and .")
+    return name
+
+
+def _map_directory(map_name: str) -> str:
+    return os.path.join(os.path.expanduser(SLAM_MAP_ROOT), _safe_map_name(map_name))
+
+
+def _find_map_file(map_name: str, extensions):
+    directory = _map_directory(map_name)
+    if not os.path.isdir(directory):
+        raise HTTPException(404, f"Map '{map_name}' not found")
+    try:
+        files = sorted(
+            f for f in os.listdir(directory)
+            if f.lower().endswith(tuple(extensions)) and os.path.isfile(os.path.join(directory, f))
+        )
+    except OSError as e:
+        raise HTTPException(500, f"Unable to read map directory: {e}")
+    if not files:
+        raise HTTPException(404, f"No {', '.join(extensions)} file found for map '{map_name}'")
+    return os.path.join(directory, files[0])
+
+
+@app.post("/maps")
+def http_create_map(req: MapCreateRequest):
+    """Create an empty map directory."""
+    name = _safe_map_name(req.map_name)
+    directory = _map_directory(name)
+    if os.path.exists(directory):
+        raise HTTPException(409, f"Map '{name}' already exists")
+    try:
+        os.makedirs(directory, exist_ok=False)
+    except OSError as e:
+        raise HTTPException(500, f"Could not create map: {e}")
+    return {"status": "created", "map_name": name}
+
+
+@app.delete("/maps/{map_name}")
+def http_delete_map(map_name: str):
+    """Delete a complete saved map directory."""
+    name = _safe_map_name(map_name)
+    directory = _map_directory(name)
+    if not os.path.isdir(directory):
+        raise HTTPException(404, f"Map '{name}' not found")
+    try:
+        shutil.rmtree(directory)
+        try:
+            package_root = os.path.join(get_package_share_directory("waregv_mapping"), "maps")
+            package_directory = os.path.join(package_root, name)
+            if os.path.isdir(package_directory):
+                shutil.rmtree(package_directory)
+        except Exception as e:
+            api_node.get_logger().warning(f"Deleted workspace map but could not remove package-share copy: {e}")
+    except OSError as e:
+        raise HTTPException(500, f"Could not delete map: {e}")
+    return {"status": "deleted", "map_name": name}
+
+
+@app.put("/maps/{map_name}/pgm")
+async def http_upload_map_pgm(map_name: str, request: Request):
+    """Upload/replace the PGM image for a map."""
+    name = _safe_map_name(map_name)
+    directory = _map_directory(name)
+    if not os.path.isdir(directory):
+        raise HTTPException(404, f"Map '{name}' not found")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "PGM file is empty")
+    if not (data.startswith(b"P5") or data.startswith(b"P2")):
+        raise HTTPException(400, "Uploaded file is not a valid PGM (P2/P5)")
+    # Remove previous PGM files so a map always has one authoritative image.
+    for f in os.listdir(directory):
+        if f.lower().endswith('.pgm'):
+            os.remove(os.path.join(directory, f))
+    path = os.path.join(directory, f"{name}.pgm")
+    try:
+        with open(path, 'wb') as fp:
+            fp.write(data)
+        try:
+            api_node._sync_saved_map_to_package_share(name)
+        except Exception as e:
+            api_node.get_logger().warning(f"Map PGM uploaded but package-share sync failed: {e}")
+    except OSError as e:
+        raise HTTPException(500, f"Could not save PGM: {e}")
+    return {"status": "uploaded", "map_name": name, "file": os.path.basename(path)}
+
+
+@app.put("/maps/{map_name}/yaml")
+async def http_upload_map_yaml(map_name: str, request: Request):
+    """Upload/replace the YAML metadata for a map."""
+    name = _safe_map_name(map_name)
+    directory = _map_directory(name)
+    if not os.path.isdir(directory):
+        raise HTTPException(404, f"Map '{name}' not found")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "YAML file is empty")
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(400, "YAML file must be UTF-8 text")
+    if not re.search(r"^\s*image\s*:", text, flags=re.MULTILINE):
+        raise HTTPException(400, "YAML map metadata must contain an image: entry")
+    # The uploaded PGM is normalized to <map_name>.pgm, so normalize the YAML
+    # image reference as well. This makes uploaded map pairs self-contained.
+    text = re.sub(r"^(\s*image\s*:)\s*.*$", r"\1 " + f"{name}.pgm", text, count=1, flags=re.MULTILINE)
+    for f in os.listdir(directory):
+        if f.lower().endswith(('.yaml', '.yml')):
+            os.remove(os.path.join(directory, f))
+    path = os.path.join(directory, f"{name}.yaml")
+    try:
+        with open(path, 'w', encoding='utf-8', newline='') as fp:
+            fp.write(text)
+        # If possible, keep the installed navigation copy synchronized too.
+        try:
+            api_node._sync_saved_map_to_package_share(name)
+        except Exception as e:
+            api_node.get_logger().warning(f"Map uploaded but package-share sync failed: {e}")
+    except OSError as e:
+        raise HTTPException(500, f"Could not save YAML: {e}")
+    return {"status": "uploaded", "map_name": name, "file": os.path.basename(path)}
+
+
+@app.get("/maps/{map_name}/pgm")
+def http_map_pgm(map_name: str):
+    """Serve the PGM image belonging to a saved map."""
+    path = _find_map_file(map_name, (".pgm",))
+    return FileResponse(path, media_type="application/octet-stream", filename=os.path.basename(path))
+
+
+@app.get("/maps/{map_name}/yaml")
+def http_map_yaml(map_name: str):
+    """Serve the YAML metadata belonging to a saved map."""
+    path = _find_map_file(map_name, (".yaml", ".yml"))
+    return FileResponse(path, media_type="text/yaml", filename=os.path.basename(path))
+
+
 @app.get("/maps")
 def http_maps():
-    root = SLAM_MAP_ROOT
+    """Return saved map directory names from the workspace maps directory.
+
+    A saved map is accepted when its directory contains at least one YAML map
+    file. This is intentionally a little more tolerant than requiring the YAML
+    filename to exactly match the directory name, because existing maps may have
+    been created by a different map-saving workflow.
+    """
+    root = os.path.expanduser(SLAM_MAP_ROOT)
     maps = []
     if os.path.isdir(root):
-        for name in sorted(os.listdir(root)):
+        for name in sorted(os.listdir(root), key=str.lower):
             d = os.path.join(root, name)
-            if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.yaml")):
+            if not os.path.isdir(d):
+                continue
+            try:
+                yaml_files = [
+                    f for f in os.listdir(d)
+                    if f.lower().endswith(('.yaml', '.yml')) and os.path.isfile(os.path.join(d, f))
+                ]
+            except OSError:
+                continue
+            if yaml_files:
                 maps.append(name)
     return {"maps": maps}
 
