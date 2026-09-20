@@ -140,14 +140,51 @@ class CommanderRestAPINode(Node):
                 self.get_logger().warn(f"Could not get current pose: {e}")
                 return None
 
+    _STACK_PATTERNS = ("slam_toolbox", "bt_navigator", "controller_server",
+                       "planner_server", "behavior_server", "waypoint_follower",
+                       "smoother_server", "velocity_smoother", "lifecycle_manager",
+                       "map_server", "amcl", "mapping.launch", "navigation.launch")
+
     def kill_active_systems(self):
-        for p in self.active_processes:
+        procs = list(self.active_processes)
+        self.active_processes.clear()
+        for p in procs:
             try:
                 os.killpg(os.getpgid(p.pid), signal.SIGINT)
-                p.wait(timeout=5)
             except Exception:
                 pass
-        self.active_processes.clear()
+        for p in procs:
+            try:
+                p.wait(timeout=6)
+            except Exception:
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+        # Orphans (previous server run / manual terminal) keep node names busy.
+        for pat in self._STACK_PATTERNS:
+            subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
+
+    def _spawn(self, cmd, tag):
+        """Start a ros2 launch with logging + early-death detection."""
+        log_path = f"/tmp/waregv_{tag}.log"
+        logf = open(log_path, "w")
+        self.get_logger().info(f"Launching {' '.join(cmd)}  (log: {log_path})")
+        p = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, env=os.environ.copy(),
+                             start_new_session=True)
+        self.active_processes.append(p)
+
+        def watch():
+            code = p.wait()
+            if p in self.active_processes:
+                try:
+                    tail = open(log_path).read()[-800:]
+                except Exception:
+                    tail = ""
+                self.get_logger().error(f"{tag} launch EXITED code={code}. Tail:\n{tail}")
+        threading.Thread(target=watch, daemon=True, name=f"watch-{tag}").start()
+        return p
 
     def detect_mode(self):
         names = [n.lower() for n in self.get_node_names()]
@@ -185,23 +222,15 @@ class CommanderRestAPINode(Node):
         time.sleep(1.5)
 
         if mode == "slam":
-            p = subprocess.Popen(
-                ["ros2", "launch", "waregv_mapping", "mapping.launch.py"],
-                preexec_fn=os.setsid,
-            )
-            self.active_processes.append(p)
+            self._spawn(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], "mapping")
         elif mode == "nav":
             # Start Nav2 with the selected map name, then explicitly reload the
             # selected YAML through map_server. This makes the dropdown selection
             # authoritative even when navigation.launch.py has a hard-coded
             # default map internally.
             self.get_logger().info(f"Starting autonomous driving with selected map: {map_name}")
-            p = subprocess.Popen(
-                ["ros2", "launch", "waregv_navigation", "navigation.launch.py",
-                 "mapping_enable:=false", f"map_name:={map_name}"],
-                preexec_fn=os.setsid,
-            )
-            self.active_processes.append(p)
+            self._spawn(["ros2", "launch", "waregv_navigation", "navigation.launch.py",
+                         "mapping_enable:=false", f"map_name:={map_name}"], "navigation")
             threading.Thread(
                 target=self._load_selected_nav_map,
                 args=(map_name, last_pose),
@@ -217,11 +246,7 @@ class CommanderRestAPINode(Node):
             self.get_logger().info(
                 f"Starting autonomous driving + map update from selected map: {map_name}"
             )
-            p1 = subprocess.Popen(
-                ["ros2", "launch", "waregv_mapping", "mapping.launch.py"],
-                preexec_fn=os.setsid,
-            )
-            self.active_processes.append(p1)
+            self._spawn(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], "mapping")
 
             threading.Thread(
                 target=self._start_slam_update_after_load,
@@ -319,12 +344,8 @@ class CommanderRestAPINode(Node):
         """Load the selected SLAM graph first, then bring up Nav2."""
         try:
             self._deserialize_slam_map(map_name)
-            p2 = subprocess.Popen(
-                ["ros2", "launch", "waregv_navigation", "navigation.launch.py",
-                 "mapping_enable:=true"],
-                preexec_fn=os.setsid,
-            )
-            self.active_processes.append(p2)
+            self._spawn(["ros2", "launch", "waregv_navigation", "navigation.launch.py",
+                         "mapping_enable:=true"], "navigation")
             self.get_logger().info(
                 f"Autonomous driving + map update started from '{map_name}'"
             )
@@ -884,6 +905,16 @@ def http_maps():
             if yaml_files:
                 maps.append(name)
     return {"maps": maps}
+
+
+@app.get("/system/log/{tag}")
+def http_launch_log(tag: str):
+    if tag not in ("mapping", "navigation"):
+        raise HTTPException(404, "unknown log")
+    try:
+        return {"tail": open(f"/tmp/waregv_{tag}.log").read()[-4000:]}
+    except Exception:
+        return {"tail": ""}
 
 
 @app.get("/slam/status")
