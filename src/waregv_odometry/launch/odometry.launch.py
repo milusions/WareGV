@@ -7,7 +7,7 @@ from launch.substitutions.launch_configuration import LaunchConfiguration
 
 def generate_launch_description():
     
-    wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.0325')
+    wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.0385')
     
     
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='true')
