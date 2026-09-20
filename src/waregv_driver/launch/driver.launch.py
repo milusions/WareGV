@@ -67,7 +67,7 @@ def generate_launch_description():
     
     return LaunchDescription([
         use_sim_time_arg,  
-        ydlidar_node,
+        # ydlidar_node,
         controller_link,
         motor_encoder,
         imu,
