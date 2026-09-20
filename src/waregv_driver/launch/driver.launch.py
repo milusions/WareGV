@@ -12,16 +12,18 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='false')
     use_sim_time = LaunchConfiguration("use_sim_time")
     
-    ydlidar_node = Node(
-        package="waregv_driver",
-        executable="ydlidar",
-        parameters=[{
-            "reverse_direction": True,
-            "angle_offset_deg": 25.0,
-            "use_sim_time": use_sim_time
-        }],
-        output="screen",
-    )
+    ydlidar_dir = get_package_share_directory('ydlidar_ros2_driver')
+
+    config_file_path = os.path.join(ydlidar_dir, 'params', 'X2.yaml')
+
+    ydlidar_node  = Node(
+            package='ydlidar_ros2_driver',
+            executable='ydlidar_ros2_driver_node',
+            name='ydlidar_ros2_driver_node',
+            output='screen',
+            parameters=[config_file_path],
+        )
+
     
     controller_link = Node(
         package="waregv_driver",
