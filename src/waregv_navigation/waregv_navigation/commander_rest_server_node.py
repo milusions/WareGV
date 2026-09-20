@@ -4,28 +4,23 @@ import math
 import os
 import signal
 import subprocess
-import collections
-import shutil
 import threading
 import time
+import json
 import re
-import shutil
 from typing import List, Tuple, Optional
 
 import rclpy
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import LaserScan
-from rcl_interfaces.msg import Log
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, PoseArray, Pose
 from nav_msgs.msg import Odometry, Path, OccupancyGrid
-from sensor_msgs.msg import JointState, Joy
+from sensor_msgs.msg import JointState, Joy, LaserScan
 from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformListener
 from ament_index_python.packages import get_package_share_directory
 from nav2_msgs.srv import LoadMap
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import uvicorn
@@ -33,19 +28,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(title="Navigation Commander REST Server")
-
-
-@app.middleware("http")
-async def _log_requests(request, call_next):
-    t0 = time.monotonic()
-    try:
-        resp = await call_next(request)
-    except Exception:
-        _make_file_logger("rest").error(f"HTTP {request.method} {request.url.path} EXC\n{_tb.format_exc()}")
-        raise
-    if request.url.path not in ("/system/mode", "/robot/pose", "/navigation/status"):   # skip 1 Hz pollers
-        _make_file_logger("rest").info(f"HTTP {request.method} {request.url.path} -> {resp.status_code} ({(time.monotonic()-t0)*1000:.0f} ms)")
-    return resp
 api_node = None
 app.add_middleware(
     CORSMiddleware,
@@ -58,47 +40,6 @@ app.add_middleware(
 HOME_DIR = os.path.expanduser("~")
 SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
 WEB_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "web")
-
-import logging as _logging, glob as _glob, shutil as _shutil, traceback as _tb
-LOG_DIR = os.path.join(os.path.expanduser("~"), "waregv", "waregv_ws", "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
-SESSION_TS = time.strftime("%Y%m%d_%H%M%S")
-
-
-def tag_log_path(tag):
-    return os.path.join(LOG_DIR, f"command_{tag}_{SESSION_TS}.log")
-
-
-def _make_file_logger(tag):
-    lg = _logging.getLogger(f"command_{tag}")
-    lg.setLevel(_logging.DEBUG)
-    if not lg.handlers:
-        fh = _logging.FileHandler(tag_log_path(tag))
-        fh.setFormatter(_logging.Formatter("%(asctime)s.%(msecs)03d [%(levelname)s] [%(threadName)s] %(message)s", "%F %T"))
-        lg.addHandler(fh)
-    return lg
-
-
-class _DualLog:
-    """Every message goes to the ROS console AND ~/waregv/waregv_ws/logs/command_<tag>_*.log"""
-    def __init__(self, ros_logger, file_logger):
-        self.r, self.f = ros_logger, file_logger
-
-    def _w(self, lvl, m):
-        try:
-            getattr(self.r, "warning" if lvl == "warn" else lvl)(m)
-        except Exception:
-            pass
-        self.f.log({"debug": 10, "info": 20, "warn": 30, "warning": 30, "error": 40}[lvl], m)
-        for h in self.f.handlers:
-            h.flush()
-
-    def debug(self, m): self._w("debug", m)
-    def info(self, m): self._w("info", m)
-    def warn(self, m): self._w("warn", m)
-    warning = warn
-    def error(self, m): self._w("error", m)
-
 HTML_FILE_PATH = os.path.join(WEB_DIR, "index.html")
 
 
@@ -114,27 +55,9 @@ def quaternion_to_yaw(q):
     )
 
 
-# Nodes that MUST exist for a stack to be considered healthy. `ros2 launch`
-# stays alive when one node inside it crashes, so poll() on the launch process
-# alone can never detect a dead slam_toolbox / bt_navigator.
-STACK_NODES = {
-    "mapping": ("slam_toolbox",),
-    "navigation": ("bt_navigator", "controller_server", "planner_server"),
-}
-STACK_GRACE_SEC = 45.0       # time a stack gets to bring its nodes up
-STACK_DEAD_SEC = 12.0        # nodes missing this long => restart
-MAP_STALL_SEC = 40.0         # robot moving + scans flowing but /map frozen
-RESTART_WINDOW_SEC = 180.0
-MAX_RESTARTS = 4
-AUTORESTART_STALL = os.environ.get("WAREGV_AUTORESTART_STALL", "0") == "1"
-
-
 class CommanderRestAPINode(Node):
     def __init__(self):
         super().__init__("commander_rest_api_node")
-        self._lg = _DualLog(Node.get_logger(self), _make_file_logger("rest"))
-        self._lg.info(f"=== REST node starting. logs in {LOG_DIR}, session {SESSION_TS} ===")
-        self._lg.info(f"which ros2 = {_shutil.which('ros2')} | AMENT_PREFIX_PATH set = {bool(os.environ.get('AMENT_PREFIX_PATH'))} | ROS_DISTRO={os.environ.get('ROS_DISTRO')}")
 
         self.pose_pub = self.create_publisher(PoseStamped, "/nav_to_pose", 10)
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, "/set_initial_pose", 10)
@@ -142,6 +65,7 @@ class CommanderRestAPINode(Node):
         self.abort_pub = self.create_publisher(Empty, "/abort_mission", 10)
         self.waypoints_pub = self.create_publisher(PoseArray, "/follow_waypoints", 10)
         self.joy_pub = self.create_publisher(Joy, "/joy", 10)
+        self.scan_normalized_pub = self.create_publisher(LaserScan, "/scan_normalized", 20)
 
         self.load_map_client = self.create_client(LoadMap, "/map_server/load_map")
 
@@ -149,6 +73,9 @@ class CommanderRestAPINode(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.active_processes = []
+        self.launch_threads = []
+        self.nav_events = []
+        self.nav_event_pub = self.create_publisher(String, "/nav_ui_events", 20)
         self.mode_lock = threading.Lock()
         self.requested_mode: Optional[str] = None
 
@@ -166,32 +93,9 @@ class CommanderRestAPINode(Node):
         self.create_subscription(JointState, "/joint_states", self._joint_cb, 20)
         self.create_subscription(Path, "/plan", self._plan_cb, 10)
         self.create_subscription(OccupancyGrid, "/map", self._map_cb, 5)
+        self.create_subscription(LaserScan, "/scan", self._scan_cb, 20)
 
-        # ---- supervision / diagnostics state
-        self.stacks = {}                       # tag -> dict(cmd, proc, started, restarts[])
-        self.requested_map = ""
-        self.map_wall = 0.0                    # wall time of last /map
-        self.scan_wall = 0.0
-        self.moving_wall = 0.0                 # last time odom speed > 0.05
-        self.health = {"mapping": "OFF", "navigation": "OFF", "slam_map": "N/A"}
-        self.rosout_ring = collections.deque(maxlen=300)
-        self.create_subscription(LaserScan, "/scan", self._scan_cb, qos_profile_sensor_data)
-        self.create_subscription(Log, "/rosout", self._rosout_cb, 50)
-        self._stall_since = None
-        from map_msgs.msg import OccupancyGridUpdate
-        from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
-        tl = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
-        self.cm = {}
-        for key, base in (("global", "/global_costmap"), ("local", "/local_costmap")):
-            self.cm[key] = {"msg": None, "pub": self.create_publisher(OccupancyGrid, f"/ui/{key}_costmap", 5)}
-            for q in (10, tl):      # volatile AND transient-local so we match either publisher
-                self.create_subscription(OccupancyGrid, f"{base}/costmap", lambda m, k=key: self._cm_full(k, m), q)
-            self.create_subscription(OccupancyGridUpdate, f"{base}/costmap_updates", lambda m, k=key: self._cm_upd(k, m), 10)
-        self.create_timer(0.5, lambda: self._cm_relay("local"))
-        self.create_timer(1.5, lambda: self._cm_relay("global"))
-        threading.Thread(target=self._supervisor_loop, daemon=True, name="stack-supervisor").start()
-
-        self._lg.info("Commander REST API Node initialized.")
+        self.get_logger().info("Commander REST API Node initialized.")
 
     def _status_cb(self, msg):
         self.nav_status = msg.data
@@ -205,9 +109,6 @@ class CommanderRestAPINode(Node):
 
     def _odom_cb(self, msg):
         self.last_odom = msg
-        v = msg.twist.twist
-        if abs(v.linear.x) > 0.05 or abs(v.angular.z) > 0.1:
-            self.moving_wall = time.monotonic()
 
     def _joint_cb(self, msg):
         self.last_joint = msg
@@ -217,35 +118,58 @@ class CommanderRestAPINode(Node):
 
     def _map_cb(self, msg):
         self.last_map = msg
-        self.map_wall = time.monotonic()
 
-    def _cm_full(self, key, msg):
-        if self.cm[key]["msg"] is None:
-            self._lg.info(f"costmap '{key}' first full grid {msg.info.width}x{msg.info.height}")
-        self.cm[key]["msg"] = msg
-
-    def _cm_upd(self, key, u):
-        m = self.cm[key]["msg"]
-        if m is None or u.x + u.width > m.info.width or u.y + u.height > m.info.height:
+    def _scan_cb(self, msg: LaserScan):
+        """Normalize YDLIDAR X2 scans to a fixed 252-beam scan."""
+        target = 252
+        src = list(msg.ranges)
+        n = len(src)
+        if n == 0:
             return
-        for r in range(u.height):
-            d = (u.y + r) * m.info.width + u.x
-            m.data[d:d + u.width] = u.data[r * u.width:(r + 1) * u.width]
-
-    def _cm_relay(self, key):
-        m = self.cm[key]["msg"]
-        if m is not None:
-            m.header.stamp = self.get_clock().now().to_msg()
-            self.cm[key]["pub"].publish(m)
-
-    def _scan_cb(self, _msg):
-        self.scan_wall = time.monotonic()
-
-    def _rosout_cb(self, msg):
-        n = msg.name or ""
-        if msg.level >= 30 and any(k in n for k in ("slam", "bt_navigator", "controller", "planner",
-                                                     "behavior", "lifecycle", "amcl", "map_server")):
-            self.rosout_ring.append({"t": time.time(), "lvl": int(msg.level), "node": n, "msg": msg.msg[:300]})
+        if n == target:
+            out = list(src)
+            out_inc = msg.angle_increment
+            out_tinc = msg.time_increment
+            intensities = list(msg.intensities) if len(msg.intensities) == n else []
+        else:
+            out = []
+            for j in range(target):
+                pos = (j * (n - 1)) / float(target - 1) if target > 1 else 0.0
+                i0 = int(math.floor(pos)); i1 = min(i0 + 1, n - 1)
+                f = pos - i0
+                a = float(src[i0]); b = float(src[i1])
+                aok = math.isfinite(a); bok = math.isfinite(b)
+                if aok and bok:
+                    v = a + (b - a) * f
+                elif aok:
+                    v = a
+                elif bok:
+                    v = b
+                else:
+                    v = float("inf")
+                out.append(v)
+            out_inc = (msg.angle_increment * (n - 1) / (target - 1)) if target > 1 else msg.angle_increment
+            out_tinc = (msg.time_increment * (n - 1) / (target - 1)) if target > 1 else msg.time_increment
+            intensities = []
+            if len(msg.intensities) == n:
+                raw_i = list(msg.intensities)
+                for j in range(target):
+                    pos = (j * (n - 1)) / float(target - 1) if target > 1 else 0.0
+                    i0 = int(math.floor(pos)); i1 = min(i0 + 1, n - 1)
+                    f = pos - i0
+                    intensities.append(float(raw_i[i0]) + (float(raw_i[i1]) - float(raw_i[i0])) * f)
+        out_msg = LaserScan()
+        out_msg.header = msg.header
+        out_msg.angle_min = msg.angle_min
+        out_msg.angle_max = msg.angle_min + out_inc * (target - 1)
+        out_msg.angle_increment = out_inc
+        out_msg.time_increment = out_tinc
+        out_msg.scan_time = msg.scan_time
+        out_msg.range_min = msg.range_min
+        out_msg.range_max = msg.range_max
+        out_msg.ranges = out
+        out_msg.intensities = intensities
+        self.scan_normalized_pub.publish(out_msg)
 
     def load_map_from_yaml(self, map_yaml_path: str):
         while not self.load_map_client.wait_for_service(timeout_sec=1.0):
@@ -269,227 +193,262 @@ class CommanderRestAPINode(Node):
             try:
                 return self.tf_buffer.lookup_transform("map", "base_footprint", rclpy.time.Time())
             except Exception as e:
-                self._lg.warn(f"Could not get current pose: {e}")
+                self.get_logger().warn(f"Could not get current pose: {e}")
                 return None
 
-    _STACK_PATTERNS = ("slam_toolbox", "bt_navigator", "controller_server",
-                       "planner_server", "behavior_server", "waypoint_follower",
-                       "smoother_server", "velocity_smoother", "lifecycle_manager",
-                       "map_server", "amcl", "mapping.launch", "navigation.launch")
+    def _ros_launch_command(self, package, launch_file, *args):
+        """Launch ROS in a login shell so commander gets the same overlay as a terminal."""
+        distro = os.environ.get("ROS_DISTRO", "humble")
+        ws_setup = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "setup.bash")
+        ros_setup = f"/opt/ros/{distro}/setup.bash"
+        cmd = ["ros2", "launch", package, launch_file, *args]
+        quoted = " ".join(subprocess.list2cmdline([x]) for x in cmd)
+        shell = (
+            f"source {subprocess.list2cmdline([ros_setup])} 2>/dev/null || true; "
+            f"source {subprocess.list2cmdline([ws_setup])} 2>/dev/null || true; "
+            f"exec {quoted}"
+        )
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        return ["bash", "-lc", shell], env
 
-    def _stop_proc(self, p):
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGINT)
-        except Exception:
+    def _emit_nav_event(self, text, level="INFO"):
+        text = (text or "").strip()
+        if not text:
             return
+        event = {"text": text, "level": level, "stamp": time.time()}
+        self.nav_events.append(event)
+        self.nav_events = self.nav_events[-30:]
         try:
-            p.wait(timeout=8)
-        except Exception:
-            try:
-                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-                p.wait(timeout=3)
-            except Exception:
-                pass
-
-    def kill_active_systems(self):
-        stacks, self.stacks = self.stacks, {}      # supervisor sees nothing to restart
-        for st in stacks.values():
-            self._stop_proc(st["proc"])
-        self.active_processes.clear()
-        # Orphans (previous server run / manual terminal) keep node names busy.
-        for pat in self._STACK_PATTERNS:
-            subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
-        self.health.update({"mapping": "OFF", "navigation": "OFF", "slam_map": "N/A"})
-
-    def _preflight(self, cmd):
-        if not _shutil.which("ros2"):
-            raise RuntimeError("'ros2' not found in PATH of the REST server process (environment not sourced?)")
-        pkg = cmd[2]
-        r = subprocess.run(["ros2", "pkg", "prefix", pkg], capture_output=True, text=True, timeout=20)
-        self._lg.info(f"preflight: ros2 pkg prefix {pkg} -> rc={r.returncode} out={r.stdout.strip()} err={r.stderr.strip()}")
-        if r.returncode != 0:
-            raise RuntimeError(f"package '{pkg}' not found by the REST server environment: {r.stderr.strip()}")
-        lf = os.path.join(r.stdout.strip(), "share", pkg, "launch", cmd[3])
-        self._lg.info(f"preflight: launch file {lf} exists={os.path.exists(lf)}")
-
-    def _launch_proc(self, cmd, tag):
-        log_path = tag_log_path(tag)
-        logf = open(log_path, "a")
-        logf.write(f"\n===== {time.strftime('%F %T')} launching: {' '.join(cmd)} =====\n")
-        logf.flush()
-        return subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
-                                stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1"},
-                                start_new_session=True)
-
-    def _spawn(self, cmd, tag):
-        """Start a launch file and register it with the supervisor."""
-        self._lg.info(f"Launching {' '.join(cmd)}  (log: {tag_log_path(tag)})")
-        self._preflight(cmd)
-        p = self._launch_proc(cmd, tag)
-        self._lg.info(f"[{tag}] started pid={p.pid}")
-        self.stacks[tag] = {"cmd": cmd, "proc": p, "started": time.monotonic(),
-                            "missing_since": None, "restarts": []}
-        self.active_processes.append(p)
-        self.health[tag] = "STARTING"
-        return p
-
-    # ---- supervisor ---------------------------------------------------
-    def _live_nodes(self):
-        try:
-            return [n.lower() for n in self.get_node_names()]
-        except Exception:
-            return []
-
-    def _restart_stack(self, tag, reason):
-        st = self.stacks.get(tag)
-        if not st:
-            return
-        now = time.monotonic()
-        st["restarts"] = [t for t in st["restarts"] if now - t < RESTART_WINDOW_SEC]
-        tail = ""
-        try:
-            tail = open(tag_log_path(tag)).read()[-600:]
+            msg = String()
+            msg.data = json.dumps(event)
+            self.nav_event_pub.publish(msg)
         except Exception:
             pass
-        if len(st["restarts"]) >= MAX_RESTARTS:
-            self.health[tag] = "FAILED"
-            self._lg.error(f"[{tag}] giving up after {MAX_RESTARTS} restarts. Last reason: {reason}\n{tail}")
-            return
-        self._lg.error(f"[{tag}] {reason} -> restarting. Log tail:\n{tail}")
-        self.health[tag] = "RESTARTING"
-        self._stop_proc(st["proc"])
-        for pat in (STACK_NODES.get(tag, ()) ):
-            subprocess.run(["pkill", "-9", "-f", pat], capture_output=True)
-        time.sleep(2.0)
-        st["restarts"].append(now)
-        st["proc"] = self._launch_proc(st["cmd"], tag)
-        st["started"] = time.monotonic()
-        st["missing_since"] = None
-        self.active_processes = [st2["proc"] for st2 in self.stacks.values()]
-        self.health[tag] = "STARTING"
 
-    def _supervisor_loop(self):
-        while rclpy.ok():
-            time.sleep(2.0)
+    def _parse_launch_line(self, line):
+        """Extract useful Nav2/SLAM events from ros2 launch output."""
+        raw = re.sub(r"\x1b\[[0-9;]*m", "", line or "").strip()
+        low = raw.lower()
+        patterns = [
+            ("error", "failed to cancel action server"),
+            ("error", "collision ahead"),
+            ("error", "rpp collision"),
+            ("error", "follow_path"),
+            ("error", "planner failed"),
+            ("error", "controller failed"),
+            ("error", "rpp"),
+            ("warning", "collision"),
+            ("warning", "failed"),
+            ("info", "goal reached"),
+            ("info", "reached the goal"),
+            ("info", "goal succeeded"),
+            ("info", "goal completed"),
+            ("info", "reached goal"),
+            ("info", "navigation succeeded"),
+            ("info", "navigation completed"),
+            ("warning", "aborted"),
+            ("warning", "cancelled"),
+            ("warning", "canceled"),
+        ]
+        for level, needle in patterns:
+            if needle in low:
+                # Keep the useful part compact; remove the ROS timestamp prefix when present.
+                clean = re.sub(r"^\[[^\]]+\]\s*", "", raw)
+                self._emit_nav_event(clean[:220], level.upper())
+                return
+
+    def _read_launch_output(self, proc, label):
+        try:
+            if proc.stdout is None:
+                return
+            for line in iter(proc.stdout.readline, ""):
+                if not line:
+                    break
+                self.get_logger().info(f"[{label}] {line.rstrip()}")
+                self._parse_launch_line(line)
+        except Exception as exc:
+            self.get_logger().warning(f"Launch output reader failed for {label}: {exc}")
+
+    def _make_mapping_wrapper(self):
+        """Create a launch wrapper that globally remaps SLAM scan input."""
+        share = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "waregv_mapping", "share", "waregv_mapping")
+        original = os.path.join(share, "launch", "mapping.launch.py")
+        wrapper = os.path.join("/tmp", "waregv_mapping_normalized.launch.py")
+        code = """from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, GroupAction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import SetRemap
+
+def generate_launch_description():
+    return LaunchDescription([
+        GroupAction(actions=[
+            SetRemap(src="/scan", dst="/scan_normalized"),
+            SetRemap(src="scan", dst="/scan_normalized"),
+            IncludeLaunchDescription(PythonLaunchDescriptionSource(r"%s")),
+        ])
+    ])
+""" % original
+        try:
+            with open(wrapper, "w", encoding="utf-8") as f:
+                f.write(code)
+            return wrapper
+        except Exception as exc:
+            self.get_logger().error(f"Could not create mapping wrapper: {exc}")
+            return None
+
+    def _start_mapping(self):
+        wrapper = self._make_mapping_wrapper()
+        if wrapper:
+            return self._start_launch_file(wrapper, label="SLAM")
+        return self._start_launch("waregv_mapping", "mapping.launch.py", label="SLAM")
+
+    def _start_launch_file(self, launch_path, args=(), label="ros2-launch"):
+        command, env = self._ros_launch_command_path(launch_path, *args)
+        self.get_logger().info("Starting: " + " ".join(command))
+        proc = subprocess.Popen(command, env=env, preexec_fn=os.setsid, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        self.active_processes.append(proc)
+        t = threading.Thread(target=self._read_launch_output, args=(proc, label), daemon=True)
+        t.start(); self.launch_threads.append(t)
+        return proc
+
+    def _ros_launch_command_path(self, launch_path, *args):
+        distro = os.environ.get("ROS_DISTRO", "jazzy")
+        ws_setup = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "setup.bash")
+        ros_setup = f"/opt/ros/{distro}/setup.bash"
+        cmd = ["ros2", "launch", launch_path, *args]
+        quoted = " ".join(subprocess.list2cmdline([x]) for x in cmd)
+        shell = f"source {subprocess.list2cmdline([ros_setup])} 2>/dev/null || true; source {subprocess.list2cmdline([ws_setup])} 2>/dev/null || true; exec {quoted}"
+        env = os.environ.copy(); env["PYTHONUNBUFFERED"] = "1"
+        return ["bash", "-lc", shell], env
+
+    def _start_launch(self, package, launch_file, args=(), label="ros2-launch"):
+        command, env = self._ros_launch_command(package, launch_file, *args)
+        self.get_logger().info("Starting: " + " ".join(command))
+        proc = subprocess.Popen(
+            command,
+            env=env,
+            preexec_fn=os.setsid,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        self.active_processes.append(proc)
+        t = threading.Thread(target=self._read_launch_output, args=(proc, label), daemon=True)
+        t.start()
+        self.launch_threads.append(t)
+        return proc
+
+    def _wait_for_node(self, fragment, timeout=45.0):
+        deadline = time.monotonic() + timeout
+        fragment = fragment.lower()
+        while time.monotonic() < deadline and rclpy.ok():
+            names = [n.lower() for n in self.get_node_names()]
+            if any(fragment in n for n in names):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def kill_active_systems(self):
+        for p in list(self.active_processes):
             try:
-                if not self.mode_lock.acquire(blocking=False):
-                    continue                     # a mode switch is in progress
+                if p.poll() is None:
+                    os.killpg(os.getpgid(p.pid), signal.SIGINT)
+                    p.wait(timeout=8)
+            except Exception:
                 try:
-                    self._supervise_once()
-                finally:
-                    self.mode_lock.release()
-            except Exception as e:
-                self._lg.error(f"supervisor error: {e}")
-
-    def _supervise_once(self):
-        nodes = self._live_nodes()
-        now = time.monotonic()
-        for tag, st in list(self.stacks.items()):
-            age = now - st["started"]
-            if st["proc"].poll() is not None:
-                self._restart_stack(tag, f"launch process exited code={st['proc'].returncode}")
-                continue
-            need = STACK_NODES.get(tag, ())
-            missing = [n for n in need if not any(n in x for x in nodes)]
-            if not missing:
-                st["missing_since"] = None
-                if self.health.get(tag) != "FAILED":
-                    self.health[tag] = "OK"
-                continue
-            if age < STACK_GRACE_SEC:
-                continue
-            st["missing_since"] = st["missing_since"] or now
-            if now - st["missing_since"] > STACK_DEAD_SEC:
-                self._restart_stack(tag, f"node(s) died/missing: {missing}")
-
-        # SLAM freshness: robot moving + scans flowing, but /map frozen.
-        m = self.stacks.get("mapping")
-        if m and self.health.get("mapping") == "OK":
-            moving = now - self.moving_wall < 10.0
-            scans = now - self.scan_wall < 3.0
-            stale = (now - self.map_wall) if self.map_wall else 1e9
-            if moving and scans and stale > MAP_STALL_SEC:
-                self.health["slam_map"] = "STALLED"
-                recent = [r for r in list(self.rosout_ring)[-6:] if "slam" in r["node"]]
-                self._lg.error(
-                    f"SLAM STALLED: /map unchanged for {stale:.0f}s while robot moves. "
-                    f"Recent slam warnings: {recent}")
-                if AUTORESTART_STALL and (now - m["started"]) > STACK_GRACE_SEC:
-                    self._restart_stack("mapping", "map stalled")
-            else:
-                self.health["slam_map"] = "OK"
+                    if p.poll() is None:
+                        os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+                except Exception:
+                    pass
+        self.active_processes.clear()
+        self.launch_threads.clear()
 
     def detect_mode(self):
         names = [n.lower() for n in self.get_node_names()]
-        has_slam = any("slam" in n for n in names)
+        has_slam = any("slam_toolbox" in n or n == "slam" for n in names)
         has_amcl = any("amcl" in n for n in names)
         has_nav = any("bt_navigator" in n for n in names)
-
-        # UI system modes:
-        # manual      -> Manual Driving (Mapping Off)
-        # slam        -> Manual Driving + New Mapping
-        # slam_update -> Autonomous Driving + Map Update
-        # nav         -> Autonomous Driving (Fixed Map)
-        if has_slam and has_nav:
+        if self.requested_mode == "slam_update" and has_slam and has_nav:
             return "slam_update"
+        if self.requested_mode == "slam" and has_slam:
+            return "slam"
+        if self.requested_mode == "nav" and has_nav:
+            return "nav"
+        if self.requested_mode == "manual" and not has_slam and not has_nav:
+            return "manual"
+        if has_slam and has_nav:
+            return "slam_update" if self.requested_mode == "slam_update" else "slam"
         if has_slam:
             return "slam"
-        if has_nav and has_amcl:
+        if has_nav:
             return "nav"
-        if not has_slam and not has_nav and not has_amcl:
-            return "manual"
-        return self.requested_mode if self.requested_mode in ("manual", "slam", "slam_update", "nav") else None
+        return "manual" if not has_amcl else None
 
     def switch_system_mode(self, mode: str, map_name: str):
-        self._lg.info(f"SWITCH REQUEST mode={mode} map='{map_name}' (current={self.detect_mode()})")
+        if mode in ("nav", "slam_update"):
+            map_name = self._resolve_map_name(map_name)
         if mode not in ("slam", "nav", "slam_update", "manual"):
             raise ValueError(f"Unknown mode '{mode}'")
-        if mode in ("nav", "slam_update") and not (map_name or "").strip():
-            raise ValueError("A saved map must be selected for this mode")
         with self.mode_lock:
             self.requested_mode = mode
-            self.requested_map = map_name
             self._switch_system_mode_locked(mode, map_name)
 
     def _switch_system_mode_locked(self, mode, map_name):
         last_pose = self.get_current_pose() if mode == "nav" else None
         self.kill_active_systems()
-        time.sleep(1.5)
+        self.nav_events.clear()
+        time.sleep(1.0)
+
+        if mode == "manual":
+            self._emit_nav_event("Manual mode active — SLAM and Nav2 stopped.", "INFO")
+            return
 
         if mode == "slam":
-            self._spawn(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], "mapping")
-        elif mode == "nav":
-            # Start Nav2 with the selected map name, then explicitly reload the
-            # selected YAML through map_server. This makes the dropdown selection
-            # authoritative even when navigation.launch.py has a hard-coded
-            # default map internally.
-            self._lg.info(f"Starting autonomous driving with selected map: {map_name}")
-            self._spawn(["ros2", "launch", "waregv_navigation", "navigation.launch.py",
-                         "mapping_enable:=false", f"map_name:={map_name}"], "navigation")
-            threading.Thread(
-                target=self._load_selected_nav_map,
-                args=(map_name, last_pose),
-                daemon=True,
-                name="selected-map-loader",
-            ).start()
+            p = self._start_mapping()
+            if not self._wait_for_node("slam_toolbox", 45):
+                self._emit_nav_event("SLAM Toolbox did not become ready.", "ERROR")
+            return
 
-        elif mode == "slam_update":
-            # IMPORTANT: do not start Nav2 and a fresh SLAM session at the same
-            # time and hope the saved graph wins a race. First start SLAM
-            # Toolbox, wait for its deserialize service, and load the selected
-            # serialized graph. Only after that succeeds do we start Nav2.
-            self._lg.info(
-                f"Starting autonomous driving + map update from selected map: {map_name}"
-            )
-            self._spawn(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], "mapping")
+        if mode == "nav":
+            p = self._start_launch(
+                "waregv_navigation", "navigation.launch.py",
+                args=("mapping_enable:=false", f"map_name:={map_name}"), label="NAV2")
+            if not self._wait_for_node("bt_navigator", 45):
+                self._emit_nav_event("Nav2 bt_navigator did not become ready.", "ERROR")
+            if last_pose:
+                threading.Thread(target=self.inject_amcl_pose, args=(last_pose,), daemon=True).start()
+            return
 
-            threading.Thread(
-                target=self._start_slam_update_after_load,
-                args=(map_name,),
-                daemon=True,
-                name="slam-update-loader",
-            ).start()
-        # manual: processes have already been stopped
+        # slam_update: normalize lidar, start SLAM, restore the pose graph, then Nav2.
+        self._start_mapping()
+        if not self._wait_for_slam_ready(60):
+            self._emit_nav_event("SLAM Toolbox did not become ready. Check /scan_normalized and mapping logs.", "ERROR")
+            return
+        if not self._load_slam_update_map(map_name):
+            self._emit_nav_event(f"Could not load SLAM pose graph for '{map_name}'. Nav2 was not started.", "ERROR")
+            return
+        self._start_launch("waregv_navigation", "navigation.launch.py", args=("mapping_enable:=true",), label="NAV2")
+        if not self._wait_for_node("bt_navigator", 60):
+            self._emit_nav_event("Nav2 bt_navigator did not become ready.", "ERROR")
+            return
+        self._emit_nav_event("SLAM and Nav2 are ready.", "INFO")
+
+    def _resolve_map_name(self, map_name):
+        name = (map_name or "").strip()
+        if name:
+            return name
+        preferred = os.path.join(SLAM_MAP_ROOT, "map", "map.yaml")
+        if os.path.exists(preferred):
+            return "map"
+        try:
+            for entry in sorted(os.listdir(SLAM_MAP_ROOT)):
+                if os.path.isfile(os.path.join(SLAM_MAP_ROOT, entry, f"{entry}.yaml")):
+                    return entry
+        except Exception:
+            pass
+        raise ValueError("No saved map is available; select a map before autonomous navigation.")
 
     def _map_base_path(self, map_name):
         name = (map_name or "").strip()
@@ -500,6 +459,18 @@ class CommanderRestAPINode(Node):
         return os.path.join(SLAM_MAP_ROOT, name, name)
 
     def _run_service_call(self, command, timeout=30):
+        if command and command[0] == "ros2":
+            full, env = self._ros_launch_command("", "", *command[1:])
+            # _ros_launch_command is a convenient environment builder; replace the
+            # generated launch invocation with the requested ros2 command.
+            distro = os.environ.get("ROS_DISTRO", "humble")
+            ros_setup = f"/opt/ros/{distro}/setup.bash"
+            ws_setup = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "setup.bash")
+            quoted = " ".join(subprocess.list2cmdline([x]) for x in command)
+            shell = (f"source {subprocess.list2cmdline([ros_setup])} 2>/dev/null || true; "
+                     f"source {subprocess.list2cmdline([ws_setup])} 2>/dev/null || true; "
+                     f"{quoted}")
+            return subprocess.run(["bash", "-lc", shell], capture_output=True, text=True, timeout=timeout, env=env)
         return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
 
     def _wait_for_ros_service(self, service_name, timeout_sec=45):
@@ -513,84 +484,36 @@ class CommanderRestAPINode(Node):
             time.sleep(0.5)
         return False
 
-    def _selected_map_yaml(self, map_name):
-        name = (map_name or "").strip()
-        if not name:
-            raise ValueError("Map name cannot be empty")
-        source = os.path.join(SLAM_MAP_ROOT, name, f"{name}.yaml")
-        if os.path.isfile(source):
-            return source
-        package = os.path.join(self._package_maps_root(), name, f"{name}.yaml")
-        if os.path.isfile(package):
-            return package
-        raise FileNotFoundError(f"Selected map YAML not found: {name}")
+    def _wait_for_slam_ready(self, timeout=60):
+        if not self._wait_for_node("slam_toolbox", timeout):
+            return False
+        return self._wait_for_ros_service("/slam_toolbox/deserialize_map", 30) or self._wait_for_ros_service("/slam_toolbox/serialize_map", 30)
 
-    def _load_selected_nav_map(self, map_name, last_pose=None):
-        """Force Nav2 map_server to use exactly the map selected in the UI."""
+    def _load_slam_update_map(self, map_name):
         try:
-            yaml_path = self._selected_map_yaml(map_name)
-            self._lg.info(f"Loading selected Nav2 map: {yaml_path}")
-            if not self._wait_for_ros_service("/map_server/load_map", 45):
-                raise RuntimeError("/map_server/load_map service did not become available")
-            result = self.load_map_from_yaml(yaml_path)
-            if result.result != 0:
-                raise RuntimeError(f"map_server rejected '{yaml_path}' with result code {result.result}")
-            self._lg.info(f"Selected map '{map_name}' is now loaded by map_server")
-            if last_pose:
-                self.inject_amcl_pose(last_pose)
+            base = self._map_base_path(map_name)
+            service = "/slam_toolbox/deserialize_map"
+            if not self._wait_for_ros_service(service, 60):
+                self.get_logger().error("SLAM Toolbox deserialize service unavailable")
+                return False
+            req = (
+                "{filename: '" + base.replace("'", "''") +
+                "', match_type: 1, initial_pose: {position: {x: 0.0, y: 0.0, z: 0.0}, "
+                "orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
+            )
+            result = self._run_service_call(
+                ["ros2", "service", "call", service,
+                 "slam_toolbox/srv/DeserializePoseGraph", req],
+                timeout=60,
+            )
+            if result.returncode != 0:
+                self.get_logger().error("SLAM update load failed: " + (result.stderr or result.stdout))
+                return False
+            self._emit_nav_event(f"Loaded SLAM map: {map_name}", "INFO")
+            return True
         except Exception as e:
-            self._lg.error(f"Selected map load failed for '{map_name}': {e}")
-
-    def _serialized_map_exists(self, map_name):
-        """Return whether SLAM Toolbox serialization files exist for this map."""
-        base = self._map_base_path(map_name)
-        # SLAM Toolbox versions commonly create .posegraph and .data files.
-        # Some versions use additional files, so require the posegraph/data
-        # pair rather than the PGM/YAML occupancy map alone.
-        return (os.path.isfile(base + ".posegraph") and os.path.isfile(base + ".data"))
-
-    def _deserialize_slam_map(self, map_name):
-        base = self._map_base_path(map_name)
-        if not self._serialized_map_exists(map_name):
-            raise FileNotFoundError(
-                f"Map '{map_name}' has no SLAM Toolbox serialized pose graph "
-                f"({base}.posegraph + {base}.data). Re-save the map while SLAM is running first."
-            )
-
-        service = "/slam_toolbox/deserialize_map"
-        if not self._wait_for_ros_service(service, 60):
-            raise RuntimeError("SLAM Toolbox deserialize service unavailable")
-
-        req = (
-            "{filename: '" + base.replace("'", "''") +
-            "', match_type: 1, initial_pose: {position: {x: 0.0, y: 0.0, z: 0.0}, "
-            "orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
-        )
-        result = self._run_service_call(
-            ["ros2", "service", "call", service,
-             "slam_toolbox/srv/DeserializePoseGraph", req],
-            timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError("SLAM Toolbox deserialize failed: " + (result.stderr or result.stdout).strip())
-        self._lg.info(f"SLAM Toolbox loaded serialized map '{map_name}'")
-
-    def _start_slam_update_after_load(self, map_name):
-        """Load the selected SLAM graph first, then bring up Nav2."""
-        try:
-            self._deserialize_slam_map(map_name)
-            self._spawn(["ros2", "launch", "waregv_navigation", "navigation.launch.py",
-                         "mapping_enable:=true"], "navigation")
-            self._lg.info(
-                f"Autonomous driving + map update started from '{map_name}'"
-            )
-        except Exception as e:
-            self._lg.error(
-                f"SLAM update for '{map_name}' was not started: {e}"
-            )
-            # Do not silently leave a fresh mapping session running when the
-            # requested saved graph could not be loaded.
-            self.kill_active_systems()
+            self.get_logger().error(f"SLAM update load error: {e}")
+            return False
 
     def inject_amcl_pose(self, transform):
         time.sleep(8)
@@ -606,29 +529,6 @@ class CommanderRestAPINode(Node):
         pose.pose.covariance[35] = 0.0685
         self.amcl_pose_pub.publish(pose)
 
-    def _package_maps_root(self):
-        """Return the maps directory used by the installed waregv_mapping package."""
-        return os.path.join(get_package_share_directory("waregv_mapping"), "maps")
-
-    def _sync_saved_map_to_package_share(self, map_name):
-        """
-        Keep the persistent/source map directory and the installed package map
-        directory in sync. The navigation launch uses the package-share maps
-        directory, while the REST API keeps saved maps in SLAM_MAP_ROOT.
-        """
-        src_dir = os.path.join(SLAM_MAP_ROOT, map_name)
-        dst_root = self._package_maps_root()
-        dst_dir = os.path.join(dst_root, map_name)
-        if not os.path.isdir(src_dir):
-            raise FileNotFoundError(f"Saved map directory does not exist: {src_dir}")
-        os.makedirs(dst_root, exist_ok=True)
-        os.makedirs(dst_dir, exist_ok=True)
-        for filename in os.listdir(src_dir):
-            src = os.path.join(src_dir, filename)
-            dst = os.path.join(dst_dir, filename)
-            if os.path.isfile(src):
-                shutil.copy2(src, dst)
-
     def save_map(self, map_name):
         def worker():
             try:
@@ -638,41 +538,19 @@ class CommanderRestAPINode(Node):
                 map_dir = os.path.join(SLAM_MAP_ROOT, name)
                 os.makedirs(map_dir, exist_ok=True)
                 base = os.path.join(map_dir, name)
-
-                map_result = self._run_service_call(
+                self._run_service_call(
                     ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base],
                     timeout=60,
                 )
-                if map_result.returncode != 0:
-                    raise RuntimeError(
-                        "map_saver_cli failed: " + (map_result.stderr or map_result.stdout).strip()
+                if self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
+                    self._run_service_call(
+                        ["ros2", "service", "call", "/slam_toolbox/serialize_map",
+                         "slam_toolbox/srv/SerializePoseGraph",
+                         "{filename: '" + base.replace("'", "''") + "'}"],
+                        timeout=120,
                     )
-
-                if not self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
-                    raise RuntimeError("/slam_toolbox/serialize_map service is not available")
-
-                serialize_result = self._run_service_call(
-                    ["ros2", "service", "call", "/slam_toolbox/serialize_map",
-                     "slam_toolbox/srv/SerializePoseGraph",
-                     "{filename: '" + base.replace("'", "''") + "'}"],
-                    timeout=120,
-                )
-                if serialize_result.returncode != 0:
-                    raise RuntimeError(
-                        "SLAM Toolbox map serialization failed: " +
-                        (serialize_result.stderr or serialize_result.stdout).strip()
-                    )
-
-                # Critical: navigation.launch.py resolves maps from the
-                # installed waregv_mapping/share/maps directory. Copy the
-                # newly saved YAML/PGM/pose-graph files there so the selected
-                # map can actually be loaded on the next mode switch.
-                self._sync_saved_map_to_package_share(name)
-                self._lg.info(
-                    f"Map '{name}' saved and synchronized to package-share maps."
-                )
             except Exception as e:
-                self._lg.error(f"Map save error: {e}")
+                self.get_logger().error(f"Map save error: {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def navigate_to_pose(self, x, y, yaw=0.0, yaw_deg=None):
@@ -753,9 +631,6 @@ class ModeRequest(BaseModel):
 class MapRequest(BaseModel):
     map_name: str
 
-class MapCreateRequest(BaseModel):
-    map_name: str
-
 class DriveRequest(BaseModel):
     linear: float
     angular: float
@@ -802,31 +677,15 @@ def http_switch_mode(req: ModeRequest):
         api_node.switch_system_mode(req.mode, req.map_name)
         return {"status": "dispatched", "mode": req.mode}
     except ValueError as e:
-        api_node._lg.warn(f"switch rejected: {e}")
         raise HTTPException(400, str(e))
-    except Exception as e:
-        api_node._lg.error("switch FAILED:\n" + _tb.format_exc())
-        raise HTTPException(500, f"Mode switch failed: {e}")
 
 
 @app.post("/system/mode/load_map")
 def http_load_map(req: MapRequest):
-    # Saved maps are persisted under SLAM_MAP_ROOT and synchronized to the
-    # package-share directory after saving. Prefer the persistent location
-    # here so this endpoint can load maps immediately as well.
-    map_name = (req.map_name or "").strip()
-    if not map_name:
-        raise HTTPException(400, "Map name cannot be empty")
-    map_yaml = os.path.join(SLAM_MAP_ROOT, map_name, f"{map_name}.yaml")
+    maps_dir = os.path.join(get_package_share_directory("waregv_mapping"), "maps")
+    map_yaml = os.path.join(maps_dir, req.map_name, f"{req.map_name}.yaml")
     if not os.path.exists(map_yaml):
-        package_map_yaml = os.path.join(
-            get_package_share_directory("waregv_mapping"), "maps",
-            map_name, f"{map_name}.yaml"
-        )
-        if os.path.exists(package_map_yaml):
-            map_yaml = package_map_yaml
-        else:
-            raise HTTPException(404, f"Map YAML not found for '{map_name}'")
+        raise HTTPException(404, f"Map YAML not found at: {map_yaml}")
     try:
         response = api_node.load_map_from_yaml(map_yaml)
         if response.result == 0:
@@ -970,234 +829,16 @@ def http_map_info():
     }
 
 
-def _safe_map_name(map_name: str) -> str:
-    """Validate a user-facing map directory name and prevent path traversal."""
-    name = (map_name or "").strip()
-    if not name:
-        raise HTTPException(400, "Map name cannot be empty")
-    if len(name) > 80:
-        raise HTTPException(400, "Map name is too long")
-    if name in {".", ".."} or "/" in name or "\\" in name or "\x00" in name:
-        raise HTTPException(400, "Map name contains invalid path characters")
-    if not re.fullmatch(r"[A-Za-z0-9 _.-]+", name):
-        raise HTTPException(400, "Map name may contain only letters, numbers, spaces, _, -, and .")
-    return name
-
-
-def _map_directory(map_name: str) -> str:
-    return os.path.join(os.path.expanduser(SLAM_MAP_ROOT), _safe_map_name(map_name))
-
-
-def _find_map_file(map_name: str, extensions):
-    directory = _map_directory(map_name)
-    if not os.path.isdir(directory):
-        raise HTTPException(404, f"Map '{map_name}' not found")
-    try:
-        files = sorted(
-            f for f in os.listdir(directory)
-            if f.lower().endswith(tuple(extensions)) and os.path.isfile(os.path.join(directory, f))
-        )
-    except OSError as e:
-        raise HTTPException(500, f"Unable to read map directory: {e}")
-    if not files:
-        raise HTTPException(404, f"No {', '.join(extensions)} file found for map '{map_name}'")
-    return os.path.join(directory, files[0])
-
-
-@app.post("/maps")
-def http_create_map(req: MapCreateRequest):
-    """Create an empty map directory."""
-    name = _safe_map_name(req.map_name)
-    directory = _map_directory(name)
-    if os.path.exists(directory):
-        raise HTTPException(409, f"Map '{name}' already exists")
-    try:
-        os.makedirs(directory, exist_ok=False)
-    except OSError as e:
-        raise HTTPException(500, f"Could not create map: {e}")
-    return {"status": "created", "map_name": name}
-
-
-@app.delete("/maps/{map_name}")
-def http_delete_map(map_name: str):
-    """Delete a complete saved map directory."""
-    name = _safe_map_name(map_name)
-    directory = _map_directory(name)
-    if not os.path.isdir(directory):
-        raise HTTPException(404, f"Map '{name}' not found")
-    try:
-        shutil.rmtree(directory)
-        try:
-            package_root = os.path.join(get_package_share_directory("waregv_mapping"), "maps")
-            package_directory = os.path.join(package_root, name)
-            if os.path.isdir(package_directory):
-                shutil.rmtree(package_directory)
-        except Exception as e:
-            api_node.get_logger().warning(f"Deleted workspace map but could not remove package-share copy: {e}")
-    except OSError as e:
-        raise HTTPException(500, f"Could not delete map: {e}")
-    return {"status": "deleted", "map_name": name}
-
-
-@app.put("/maps/{map_name}/pgm")
-async def http_upload_map_pgm(map_name: str, request: Request):
-    """Upload/replace the PGM image for a map."""
-    name = _safe_map_name(map_name)
-    directory = _map_directory(name)
-    if not os.path.isdir(directory):
-        raise HTTPException(404, f"Map '{name}' not found")
-    data = await request.body()
-    if not data:
-        raise HTTPException(400, "PGM file is empty")
-    if not (data.startswith(b"P5") or data.startswith(b"P2")):
-        raise HTTPException(400, "Uploaded file is not a valid PGM (P2/P5)")
-    # Remove previous PGM files so a map always has one authoritative image.
-    for f in os.listdir(directory):
-        if f.lower().endswith('.pgm'):
-            os.remove(os.path.join(directory, f))
-    path = os.path.join(directory, f"{name}.pgm")
-    try:
-        with open(path, 'wb') as fp:
-            fp.write(data)
-        try:
-            api_node._sync_saved_map_to_package_share(name)
-        except Exception as e:
-            api_node.get_logger().warning(f"Map PGM uploaded but package-share sync failed: {e}")
-    except OSError as e:
-        raise HTTPException(500, f"Could not save PGM: {e}")
-    return {"status": "uploaded", "map_name": name, "file": os.path.basename(path)}
-
-
-@app.put("/maps/{map_name}/yaml")
-async def http_upload_map_yaml(map_name: str, request: Request):
-    """Upload/replace the YAML metadata for a map."""
-    name = _safe_map_name(map_name)
-    directory = _map_directory(name)
-    if not os.path.isdir(directory):
-        raise HTTPException(404, f"Map '{name}' not found")
-    data = await request.body()
-    if not data:
-        raise HTTPException(400, "YAML file is empty")
-    try:
-        text = data.decode('utf-8')
-    except UnicodeDecodeError:
-        raise HTTPException(400, "YAML file must be UTF-8 text")
-    if not re.search(r"^\s*image\s*:", text, flags=re.MULTILINE):
-        raise HTTPException(400, "YAML map metadata must contain an image: entry")
-    # The uploaded PGM is normalized to <map_name>.pgm, so normalize the YAML
-    # image reference as well. This makes uploaded map pairs self-contained.
-    text = re.sub(r"^(\s*image\s*:)\s*.*$", r"\1 " + f"{name}.pgm", text, count=1, flags=re.MULTILINE)
-    for f in os.listdir(directory):
-        if f.lower().endswith(('.yaml', '.yml')):
-            os.remove(os.path.join(directory, f))
-    path = os.path.join(directory, f"{name}.yaml")
-    try:
-        with open(path, 'w', encoding='utf-8', newline='') as fp:
-            fp.write(text)
-        # If possible, keep the installed navigation copy synchronized too.
-        try:
-            api_node._sync_saved_map_to_package_share(name)
-        except Exception as e:
-            api_node.get_logger().warning(f"Map uploaded but package-share sync failed: {e}")
-    except OSError as e:
-        raise HTTPException(500, f"Could not save YAML: {e}")
-    return {"status": "uploaded", "map_name": name, "file": os.path.basename(path)}
-
-
-@app.get("/maps/{map_name}/zip")
-def http_map_zip(map_name: str):
-    """Download every file of a saved map (yaml, pgm, posegraph, data...) as one zip."""
-    import io, zipfile
-    from fastapi.responses import Response
-    name = _safe_map_name(map_name)
-    d = _map_directory(name)
-    if not os.path.isdir(d):
-        raise HTTPException(404, f"Map '{name}' not found")
-    buf = io.BytesIO()
-    count = 0
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, _dirs, files in os.walk(d):
-            for f in files:
-                full = os.path.join(root, f)
-                z.write(full, os.path.join(name, os.path.relpath(full, d)))
-                count += 1
-    if count == 0:
-        raise HTTPException(404, f"Map '{name}' has no files")
-    api_node._lg.info(f"map zip download: {name} ({count} files, {buf.tell()} bytes)")
-    return Response(buf.getvalue(), media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
-
-
-@app.get("/maps/{map_name}/pgm")
-def http_map_pgm(map_name: str):
-    """Serve the PGM image belonging to a saved map."""
-    path = _find_map_file(map_name, (".pgm",))
-    return FileResponse(path, media_type="application/octet-stream", filename=os.path.basename(path))
-
-
-@app.get("/maps/{map_name}/yaml")
-def http_map_yaml(map_name: str):
-    """Serve the YAML metadata belonging to a saved map."""
-    path = _find_map_file(map_name, (".yaml", ".yml"))
-    return FileResponse(path, media_type="text/yaml", filename=os.path.basename(path))
-
-
 @app.get("/maps")
 def http_maps():
-    """Return saved map directory names from the workspace maps directory.
-
-    A saved map is accepted when its directory contains at least one YAML map
-    file. This is intentionally a little more tolerant than requiring the YAML
-    filename to exactly match the directory name, because existing maps may have
-    been created by a different map-saving workflow.
-    """
-    root = os.path.expanduser(SLAM_MAP_ROOT)
+    root = SLAM_MAP_ROOT
     maps = []
     if os.path.isdir(root):
-        for name in sorted(os.listdir(root), key=str.lower):
+        for name in sorted(os.listdir(root)):
             d = os.path.join(root, name)
-            if not os.path.isdir(d):
-                continue
-            try:
-                yaml_files = [
-                    f for f in os.listdir(d)
-                    if f.lower().endswith(('.yaml', '.yml')) and os.path.isfile(os.path.join(d, f))
-                ]
-            except OSError:
-                continue
-            if yaml_files:
+            if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.yaml")):
                 maps.append(name)
     return {"maps": maps}
-
-
-@app.get("/system/diagnostics")
-def http_diagnostics():
-    n = api_node
-    now = time.monotonic()
-    nodes = n._live_nodes()
-    return {
-        "mode": n.detect_mode(), "requested": n.requested_mode,
-        "health": dict(n.health),
-        "stacks": {t: {"alive": st["proc"].poll() is None, "pid": st["proc"].pid,
-                       "restarts_in_window": len(st["restarts"]),
-                       "uptime_s": round(now - st["started"], 1)} for t, st in n.stacks.items()},
-        "expected_nodes_present": {t: {x: any(x in y for y in nodes) for x in STACK_NODES[t]}
-                                   for t in n.stacks if t in STACK_NODES},
-        "map_age_s": round(now - n.map_wall, 1) if n.map_wall else None,
-        "scan_age_s": round(now - n.scan_wall, 1) if n.scan_wall else None,
-        "moving_recently": now - n.moving_wall < 10.0,
-        "recent_warnings": list(n.rosout_ring)[-25:],
-    }
-
-
-@app.get("/system/log/{tag}")
-def http_launch_log(tag: str):
-    if tag not in ("mapping", "navigation"):
-        raise HTTPException(404, "unknown log")
-    try:
-        return {"tail": open(tag_log_path(tag)).read()[-4000:]}
-    except Exception:
-        return {"tail": ""}
 
 
 @app.get("/slam/status")
@@ -1270,10 +911,7 @@ def main():
     global api_node
     rclpy.init()
     api_node = CommanderRestAPINode()
-    from rclpy.executors import MultiThreadedExecutor
-    _ex = MultiThreadedExecutor(num_threads=4)
-    _ex.add_node(api_node)
-    ros_thread = threading.Thread(target=_ex.spin, daemon=True)
+    ros_thread = threading.Thread(target=rclpy.spin, args=(api_node,), daemon=True)
     ros_thread.start()
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000)
