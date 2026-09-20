@@ -3,8 +3,8 @@ import signal
 import subprocess
 import threading
 import time
-import re
 from sensor_msgs.msg import Joy
+import rclpy
 
 HOME_DIR = os.path.expanduser("~")
 LOG_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "logs")
@@ -28,10 +28,8 @@ class ManualDriveManager:
         self.node.joy_pub.publish(msg)
 
     def start_slam_mapping(self):
-        wrapper = self._make_mapping_wrapper()
-        launch_target = wrapper if wrapper else "mapping.launch.py"
-        package = None if wrapper else "waregv_mapping"
-        return self._start_launch(package, launch_target, label="MANUAL_SLAM")
+        # SIMPLIFIED: Directly launch the mapping file just like you do in the terminal
+        return self._start_launch("waregv_mapping", "mapping.launch.py", label="MANUAL_SLAM")
 
     def save_map(self, map_name: str):
         def worker():
@@ -81,17 +79,13 @@ class ManualDriveManager:
         ws_setup = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "setup.bash")
         ros_setup = f"/opt/ros/{distro}/setup.bash"
         
-        if package:
-            cmd = ["ros2", "launch", package, launch_file]
-        else:
-            cmd = ["ros2", "launch", launch_file]
+        cmd = ["ros2", "launch", package, launch_file]
             
         quoted = " ".join(subprocess.list2cmdline([x]) for x in cmd)
         shell = f"source {ros_setup} 2>/dev/null || true; source {ws_setup} 2>/dev/null || true; exec {quoted}"
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
-        # Overwrite mode for manual mapping logging
         f = open(self.log_file_path, "w", encoding="utf-8", buffering=1)
         f.write(f"===== START {label} {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
         self.launch_log_handles[label] = f
@@ -114,27 +108,6 @@ class ManualDriveManager:
                 file_handle.flush()
         except Exception as e:
             self.node.get_logger().error(f"Log read failed: {e}")
-
-    def _make_mapping_wrapper(self):
-        share = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "waregv_mapping", "share", "waregv_mapping")
-        original = os.path.join(share, "launch", "mapping.launch.py")
-        wrapper = os.path.join("/tmp", "waregv_mapping_normalized.launch.py")
-        if not os.path.exists(original): return None
-        code = f"""from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, GroupAction
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import SetRemap
-def generate_launch_description():
-    return LaunchDescription([
-        GroupAction(actions=[
-            SetRemap(src="scan", dst="/scan_normalized"),
-            SetRemap(src="/scan", dst="/scan_normalized"),
-            IncludeLaunchDescription(PythonLaunchDescriptionSource('{original}')),
-        ])
-    ])
-"""
-        with open(wrapper, "w") as f: f.write(code)
-        return wrapper
 
     def _run_command(self, command):
         distro = os.environ.get("ROS_DISTRO", "humble")

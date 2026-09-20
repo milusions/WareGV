@@ -8,14 +8,11 @@ from typing import List, Optional
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, PoseArray, Pose
-from nav_msgs.msg import Odometry, Path, OccupancyGrid
-from sensor_msgs.msg import JointState, Joy, LaserScan
-from std_msgs.msg import Empty, String
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import Joy
 from tf2_ros import Buffer, TransformListener
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,7 +30,6 @@ class CommanderRestAPINode(Node):
         super().__init__("commander_rest_api_node")
         self.pose_pub = self.create_publisher(PoseStamped, "/nav_to_pose", 10)
         self.joy_pub = self.create_publisher(Joy, "/joy", 10)
-        self.scan_normalized_pub = self.create_publisher(LaserScan, "/scan_normalized", 20)
         
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -44,33 +40,7 @@ class CommanderRestAPINode(Node):
         self.manual_manager = ManualDriveManager(self)
         self.autonomous_manager = AutonomousDriveManager(self)
         
-        self.create_subscription(LaserScan, "/scan", self._scan_cb, 20)
-        self.get_logger().info("Commander REST API Node initialized.")
-
-    def _scan_cb(self, msg: LaserScan):
-        # Scan normalization logic (YDLIDAR X2 mapping to 252 beams)
-        target = 252
-        src = list(msg.ranges)
-        n = len(src)
-        if n == 0 or n == target:
-            self.scan_normalized_pub.publish(msg)
-            return
-        
-        out = []
-        for j in range(target):
-            pos = (j * (n - 1)) / float(target - 1) if target > 1 else 0.0
-            i0 = int(math.floor(pos))
-            i1 = min(i0 + 1, n - 1)
-            v = src[i0] if math.isfinite(src[i0]) else float("inf")
-            out.append(v)
-            
-        out_msg = LaserScan()
-        out_msg.header = msg.header
-        out_msg.angle_min = msg.angle_min
-        out_msg.angle_max = msg.angle_min + msg.angle_increment * (target - 1)
-        out_msg.angle_increment = msg.angle_increment
-        out_msg.ranges = out
-        self.scan_normalized_pub.publish(out_msg)
+        self.get_logger().info("Commander REST API Node initialized. Lidar normalization removed for direct SLAM pass-through.")
 
     def switch_system_mode(self, mode: str, map_name: str):
         with self.mode_lock:
@@ -100,6 +70,14 @@ class DriveRequest(BaseModel):
 class ModeRequest(BaseModel):
     mode: str
     map_name: str = "map"
+
+@app.get("/system/mode")
+def http_get_mode():
+    return {
+        "mode": api_node.requested_mode or "manual", 
+        "requested": api_node.requested_mode,
+        "switching": api_node.mode_lock.locked()
+    }
 
 @app.post("/system/mode")
 def http_switch_mode(req: ModeRequest):
