@@ -20,7 +20,7 @@ from tf2_ros import Buffer, TransformListener
 from ament_index_python.packages import get_package_share_directory
 from nav2_msgs.srv import LoadMap
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import uvicorn
@@ -337,21 +337,31 @@ def http_maps():
     return {"maps": maps}
 
 @app.post("/maps")
-async def http_upload_map(
-    map_name: str = Form(...),
-    pgm: UploadFile = File(...),
-    yaml: UploadFile = File(...),
-):
-    name = safe_map_name(map_name)
+async def http_upload_map(request: Request):
+    form = await request.form()
+    name = None
+    pgm_file = yaml_file = None
+    for _key, val in form.multi_items():
+        if hasattr(val, "filename"):  # file field
+            fn = (val.filename or "").lower()
+            if fn.endswith(".pgm"):
+                pgm_file = val
+            elif fn.endswith((".yaml", ".yml")):
+                yaml_file = val
+        elif name is None:
+            name = val
+    if not (name and pgm_file and yaml_file):
+        raise HTTPException(400, "Need a map name, a .pgm file and a .yaml file")
+
+    name = safe_map_name(name)
     map_dir = os.path.join(SLAM_MAP_ROOT, name)
     if os.path.exists(map_dir):
         raise HTTPException(409, f"Map already exists: {name}")
     os.makedirs(map_dir)
     try:
         with open(os.path.join(map_dir, f"{name}.pgm"), "wb") as f:
-            shutil.copyfileobj(pgm.file, f)
-        text = (await yaml.read()).decode("utf-8")
-        # point image field at the renamed pgm
+            shutil.copyfileobj(pgm_file.file, f)
+        text = (await yaml_file.read()).decode("utf-8")
         if re.search(r"(?m)^image:", text):
             text = re.sub(r"(?m)^image:.*$", f"image: {name}.pgm", text)
         else:
