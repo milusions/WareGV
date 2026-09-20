@@ -12,7 +12,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, PoseArray, Pose
 from nav_msgs.msg import Odometry, Path, OccupancyGrid
-from sensor_msgs.msg import JointState, Joy, LaserScan
+from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformListener
 from ament_index_python.packages import get_package_share_directory

@@ -28,7 +28,6 @@ class ManualDriveManager:
         self.node.joy_pub.publish(msg)
 
     def start_slam_mapping(self):
-        # SIMPLIFIED: Directly launch the mapping file just like you do in the terminal
         return self._start_launch("waregv_mapping", "mapping.launch.py", label="MANUAL_SLAM")
 
     def save_map(self, map_name: str):
