@@ -1104,6 +1104,30 @@ async def http_upload_map_yaml(map_name: str, request: Request):
     return {"status": "uploaded", "map_name": name, "file": os.path.basename(path)}
 
 
+@app.get("/maps/{map_name}/zip")
+def http_map_zip(map_name: str):
+    """Download every file of a saved map (yaml, pgm, posegraph, data...) as one zip."""
+    import io, zipfile
+    from fastapi.responses import Response
+    name = _safe_map_name(map_name)
+    d = _map_directory(name)
+    if not os.path.isdir(d):
+        raise HTTPException(404, f"Map '{name}' not found")
+    buf = io.BytesIO()
+    count = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _dirs, files in os.walk(d):
+            for f in files:
+                full = os.path.join(root, f)
+                z.write(full, os.path.join(name, os.path.relpath(full, d)))
+                count += 1
+    if count == 0:
+        raise HTTPException(404, f"Map '{name}' has no files")
+    api_node._lg.info(f"map zip download: {name} ({count} files, {buf.tell()} bytes)")
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+
 @app.get("/maps/{map_name}/pgm")
 def http_map_pgm(map_name: str):
     """Serve the PGM image belonging to a saved map."""

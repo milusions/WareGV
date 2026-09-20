@@ -14,13 +14,15 @@ def generate_launch_description():
 
     mapping_check_arg = DeclareLaunchArgument(name="mapping_enable", default_value='true')
     navigation_check_arg = DeclareLaunchArgument(name="navigation_enable", default_value='true')
+    start_commander_arg = DeclareLaunchArgument(name="start_commander", default_value='false')  # driver launch already runs it
     map_name_arg = DeclareLaunchArgument(name="map_name", default_value='small_warehouse')
-    use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='true')
+    use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='false')
  
     map_name = LaunchConfiguration("map_name")
     
-    # Flat maps directory logic (e.g. maps/small_warehouse.yaml)
-    map_file = PathJoinSubstitution([waregv_mapping_dir, "maps", PythonExpression(["'", map_name, "','.yaml'"])])
+    # Maps are saved as maps/<name>/<name>.yaml (NOT flat). A wrong path makes map_server fail,
+    # the lifecycle manager aborts and Nav2 never becomes active.
+    map_file = PathJoinSubstitution([waregv_mapping_dir, "maps", map_name, PythonExpression(["'", map_name, ".yaml'"])])
     nav2_params_file = os.path.join(waregv_navigation_dir, 'config', 'nav2_params.yaml')
     
     nav_node = GroupAction(
@@ -62,10 +64,12 @@ def generate_launch_description():
         executable="commander",
         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
         output="screen",
+        condition=IfCondition(LaunchConfiguration("start_commander")),
     )
 
     return LaunchDescription([
         use_sim_time_arg,
+        start_commander_arg,
         map_name_arg,
         mapping_check_arg,
         navigation_check_arg,
