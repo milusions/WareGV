@@ -151,19 +151,27 @@ class CommanderRestAPINode(Node):
         has_slam = any("slam" in n for n in names)
         has_amcl = any("amcl" in n for n in names)
         has_nav = any("bt_navigator" in n for n in names)
+
+        # UI system modes:
+        # manual      -> Manual Driving (Mapping Off)
+        # slam        -> Manual Driving + New Mapping
+        # slam_update -> Autonomous Driving + Map Update
+        # nav         -> Autonomous Driving (Fixed Map)
         if has_slam and has_nav:
-            return "slam_update" if self.requested_mode == "slam_update" else "slam_nav"
+            return "slam_update"
         if has_slam:
-            return "slam_update" if self.requested_mode == "slam_update" else "slam"
+            return "slam"
         if has_nav and has_amcl:
             return "nav"
         if not has_slam and not has_nav and not has_amcl:
             return "manual"
-        return None
+        return self.requested_mode if self.requested_mode in ("manual", "slam", "slam_update", "nav") else None
 
     def switch_system_mode(self, mode: str, map_name: str):
-        if mode not in ("slam", "nav", "slam_nav", "slam_update", "manual"):
+        if mode not in ("slam", "nav", "slam_update", "manual"):
             raise ValueError(f"Unknown mode '{mode}'")
+        if mode in ("nav", "slam_update") and not (map_name or "").strip():
+            raise ValueError("A saved map must be selected for this mode")
         with self.mode_lock:
             self.requested_mode = mode
             self._switch_system_mode_locked(mode, map_name)
@@ -188,13 +196,6 @@ class CommanderRestAPINode(Node):
             self.active_processes.append(p)
             if last_pose:
                 threading.Thread(target=self.inject_amcl_pose, args=(last_pose,), daemon=True).start()
-        elif mode == "slam_nav":
-            p1 = subprocess.Popen(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], preexec_fn=os.setsid)
-            p2 = subprocess.Popen(
-                ["ros2", "launch", "waregv_navigation", "navigation.launch.py", "mapping_enable:=true"],
-                preexec_fn=os.setsid,
-            )
-            self.active_processes.extend([p1, p2])
         elif mode == "slam_update":
             p1 = subprocess.Popen(["ros2", "launch", "waregv_mapping", "mapping.launch.py"], preexec_fn=os.setsid)
             p2 = subprocess.Popen(
