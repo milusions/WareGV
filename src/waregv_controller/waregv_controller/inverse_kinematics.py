@@ -41,7 +41,7 @@ class InverseKinematics(Node):
         if self.use_sim_time:
           cmd_msg.data = self.inverse_kinematics(linear_x, -1*angular_z)
         else:
-            cmd_msg.data = self.inverse_kinematics(linear_x, angular_z)
+            cmd_msg.data = self.inverse_kinematics(linear_x, -1*angular_z)
 
         self.publisher.publish(cmd_msg)
         
