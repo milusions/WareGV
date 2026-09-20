@@ -25,6 +25,9 @@ app = FastAPI(title="Navigation Commander REST Server")
 api_node = None
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+HOME_DIR = os.path.expanduser("~")
+SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
+
 class CommanderRestAPINode(Node):
     def __init__(self):
         super().__init__("commander_rest_api_node")
@@ -40,7 +43,7 @@ class CommanderRestAPINode(Node):
         self.manual_manager = ManualDriveManager(self)
         self.autonomous_manager = AutonomousDriveManager(self)
         
-        self.get_logger().info("Commander REST API Node initialized. Lidar normalization removed for direct SLAM pass-through.")
+        self.get_logger().info("Commander REST API Node initialized.")
 
     def switch_system_mode(self, mode: str, map_name: str):
         with self.mode_lock:
@@ -90,6 +93,17 @@ def http_switch_mode(req: ModeRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+@app.get("/maps")
+def http_maps():
+    root = SLAM_MAP_ROOT
+    maps = []
+    if os.path.isdir(root):
+        for name in sorted(os.listdir(root)):
+            d = os.path.join(root, name)
+            if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.yaml")):
+                maps.append(name)
+    return {"maps": maps}
+
 @app.post("/system/save_map")
 def http_save_map(req: MapRequest):
     api_node.manual_manager.save_map(req.map_name)
@@ -110,9 +124,9 @@ def main():
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000)
     finally:
-        api_node.shutdown_managers()
-        api_node.destroy_node()
-        rclpy.shutdown()
+      api_node.shutdown_managers()
+      api_node.destroy_node()
+      rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
