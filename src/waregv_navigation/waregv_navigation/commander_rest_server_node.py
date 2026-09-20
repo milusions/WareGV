@@ -21,8 +21,8 @@ import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import specialized modules
-from manual_drive import ManualDriveManager
-from autonomous_drive import AutonomousDriveManager
+from waregv_navigation.manual_drive import ManualDriveManager
+from waregv_navigation.autonomous_drive import AutonomousDriveManager
 
 app = FastAPI(title="Navigation Commander REST Server")
 api_node = None
