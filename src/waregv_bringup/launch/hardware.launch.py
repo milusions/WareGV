@@ -84,14 +84,14 @@ def generate_launch_description():
     )
 
     robot_localization_node = Node(
-        package="robot_localization_node",
-        executable="ekf_node",
-        name="ekf_filter_node",
-        parameters=[efk_node_params_file],
-        remappings=[
+    package="robot_localization",  # Fixed package name
+    executable="ekf_node",
+    name="ekf_filter_node",
+    parameters=[efk_node_params_file],
+    remappings=[
         ('odometry/filtered', '/odometry/filtered')
     ]
-    )
+)
 
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
