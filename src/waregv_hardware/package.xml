@@ -9,7 +9,6 @@
 
   <!-- Buildtool Dependencies -->
   <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <!-- C++ dependencies for ros2_control -->
   <depend>hardware_interface</depend>
@@ -17,8 +16,7 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
 
-  <!-- Python Dependencies -->
-  <depend>rclpy</depend>
+
 
   <!-- Test Dependencies -->
   <test_depend>ament_lint_auto</test_depend>

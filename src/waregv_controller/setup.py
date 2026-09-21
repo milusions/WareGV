@@ -23,7 +23,6 @@ for folder in ['launch']:
         install_dir = os.path.join('share', package_name, os.path.dirname(file_path))
         data_files.append((install_dir, [file_path]))
 
-
 setup(
     name=package_name,
     version='0.0.0',
@@ -43,7 +42,7 @@ setup(
     entry_points={
         'console_scripts': [
             "joystick_control=waregv_controller.joystick_controller:main",
-                        "inverse_kinematics=waregv_controller.inverse_kinematics:main"
+                        "imu_chasis=waregv_controller.imu_chasis:main"
         ],
     },
 )

@@ -14,7 +14,7 @@ endif()
 # Dependencies
 # -----------------------------------------------------------------------------
 find_package(ament_cmake REQUIRED)
-find_package(ament_cmake_python REQUIRED)
+
 
 # ros2_control & C++ Dependencies
 find_package(hardware_interface REQUIRED)
@@ -53,15 +53,6 @@ pluginlib_export_plugin_description_file(
   waregv_hardware.xml
 )
 
-# -----------------------------------------------------------------------------
-# Python Package & Executables Setup
-# -----------------------------------------------------------------------------
-ament_python_install_package(${PROJECT_NAME})
-
-install(PROGRAMS 
-  waregv_hardware/imu_chasis.py
-  DESTINATION lib/${PROJECT_NAME}
-)
 
 # -----------------------------------------------------------------------------
 # Install C++ Libraries, Headers, Launch & Directories
