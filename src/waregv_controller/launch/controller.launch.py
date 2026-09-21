@@ -35,12 +35,6 @@ def generate_launch_description():
         output="screen",
     )
     
-    waregv_inverse_kinematics = Node(
-        package="waregv_controller",
-        executable="inverse_kinematics",
-         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "wheel_radius":LaunchConfiguration('wheel_radius'), "wheel_base":LaunchConfiguration('wheel_base')}],
-        output="screen",
-    )
 
     return LaunchDescription([
                                 use_sim_time_arg,
@@ -49,7 +43,6 @@ def generate_launch_description():
                             max_linear_velocity_arg,
                             max_angular_velocity_arg,
                               joystick_node,
-                              waregv_controller,
-                              waregv_inverse_kinematics
+                              waregv_controller
                               
                              ])

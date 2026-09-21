@@ -36,8 +36,8 @@ def generate_launch_description():
 
     use_sim_time = "false"
 
-    # ROSBridge Websocket
     rosbridge_dir = get_package_share_directory("rosbridge_server")
+    
     rosbridge_node = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(
             os.path.join(rosbridge_dir, "launch", "rosbridge_websocket_launch.xml")
@@ -45,7 +45,7 @@ def generate_launch_description():
         launch_arguments={"port": "9090", "ssl": "false", "output": "log"}.items(),
     )
 
-    # Foxglove Bridge
+
     qos_overrides = {
         "/initialpose": {"durability": "volatile"},
         "/map": {
@@ -76,8 +76,8 @@ def generate_launch_description():
         forwarding=True,
     )
 
-    # Twist Mux Node
     twist_mux_node_config_filepath = os.path.join(waregv_bringup_dir, "config", "twist_mux.yaml")
+    
     twist_mux_node = Node(
         package="twist_mux",
         executable="twist_mux",
@@ -86,18 +86,11 @@ def generate_launch_description():
         remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
     )
 
-    # Heartbeat Node
-    heartbeat_light = Node(
-        package="waregv_heartbeat",
-        executable="heartbeat_light",
-        name="heartbeat_light",
-        parameters=[{"use_sim_time": False}],
-    )
 
-    # Robot Controller
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"), "launch", "controller.launch.py"
     )
+    
     waregv_controller = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_controller_launch_file_path),
         launch_arguments={
@@ -109,41 +102,41 @@ def generate_launch_description():
         }.items(),
     )
 
-    # Robot URDF Description
+
     waregv_description_launch_file_path = os.path.join(
         get_package_share_directory("waregv_description"), "launch", "urdf.launch.py"
     )
+    
     waregv_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_description_launch_file_path),
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
-    # Hardware Driver
     waregv_driver_launch_file_path = os.path.join(
         get_package_share_directory("waregv_driver"), "launch", "driver.launch.py"
     )
+    
     waregv_driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_driver_launch_file_path),
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
-    # Web Dashboard / Navigation
-    waregv_web_dashboard_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_navigation"), "launch", "dashboard.launch.py"
+
+    waregv_dashboard_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_dashboard"), "launch", "dashboard.launch.py"
     )
-    waregv_web_dashboard = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_web_dashboard_launch_file_path),
+    
+    waregv_dashboard = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_dashboard_launch_file_path),
         launch_arguments={
             "use_sim_time": use_sim_time,
-            "mapping_enable": mapping_enable_conf,
-            "navigation_enable": navigation_enable_conf,
-            "map_name": map_name_conf,
         }.items(),
     )
     
     waregv_mapping_launch_file_path = os.path.join(
         get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
     )
+    
     waregv_mapping = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
         launch_arguments={
@@ -154,6 +147,7 @@ def generate_launch_description():
     waregv_navigation_launch_file_path = os.path.join(
         get_package_share_directory("waregv_navigation"), "launch", "navigation.launch.py"
     )
+    
     waregv_navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
         launch_arguments={
@@ -161,18 +155,6 @@ def generate_launch_description():
             "mapping_enable": mapping_enable_conf,
             "navigation_enable": navigation_enable_conf,
             "map_name": map_name_conf,
-        }.items(),
-    )
-
-    # Odometry
-    waregv_odometry_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_odometry"), "launch", "odometry.launch.py"
-    )
-    waregv_odometry = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "wheel_radius": wheel_radius_conf,
         }.items(),
     )
 
@@ -184,15 +166,13 @@ def generate_launch_description():
         wheel_radius_arg,
         wheel_base_arg,
         map_name_arg,
-        heartbeat_light,
+            waregv_description,
         foxglove_bridge,
-        waregv_description,
         rosbridge_node,
         waregv_driver,
         twist_mux_node,
-        waregv_odometry,
         waregv_controller,
-       waregv_mapping,
-       waregv_navigation,
-       waregv_web_dashboard
+        waregv_mapping,
+        waregv_navigation,
+        waregv_dashboard
     ])
