@@ -1,0 +1,40 @@
+# MERGE these sections into a COPY of your existing Nav2 params file
+# (keep everything else: controller_server, bt_navigator, local_costmap, ... unchanged)
+# Save as: ~/waregv/waregv_ws/src/waregv_navigation/config/nav2_params_unknown_space.yaml
+# Used only by mode 3 (Autonomous + new mapping). Mode 4 keeps your normal static-map params.
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      global_frame: map
+      robot_base_frame: base_link
+      rolling_window: true        # costmap follows the robot, not a fixed map
+      width: 40                   # metres; goals farther than width/2 from robot fail
+      height: 40
+      resolution: 0.05
+      track_unknown_space: false  # unseen cells count as free -> optimistic planning
+      plugins: ["obstacle_layer", "inflation_layer"]   # NO static_layer
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          raytrace_max_range: 8.0
+          obstacle_max_range: 6.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+
+planner_server:
+  ros__parameters:
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true

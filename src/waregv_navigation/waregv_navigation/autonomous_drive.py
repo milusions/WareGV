@@ -7,6 +7,10 @@ import rclpy
 
 HOME_DIR = os.path.expanduser("~")
 LOG_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "logs")
+# Optional Nav2 params for mode 3 (plan through unknown space). If this file exists it is
+# passed to navigation.launch.py as params_file:=... (launch file must declare that argument).
+NAV_PARAMS_UNKNOWN_SPACE = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_navigation",
+                                        "config", "nav2_params_unknown_space.yaml")
 SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
 
 class AutonomousDriveManager:
@@ -57,7 +61,12 @@ class AutonomousDriveManager:
                     return
 
                 # 4) Now start Nav2
-                manual_manager._start_launch("waregv_navigation", "navigation.launch.py", label="AUTONOMOUS_NAV")
+                extra = []
+                if not load_existing and os.path.exists(NAV_PARAMS_UNKNOWN_SPACE):
+                    extra = [f"params_file:={NAV_PARAMS_UNKNOWN_SPACE}"]
+                    self.node.get_logger().info(f"Nav2 using unknown-space params: {NAV_PARAMS_UNKNOWN_SPACE}")
+                manual_manager._start_launch("waregv_navigation", "navigation.launch.py",
+                                             label="AUTONOMOUS_NAV", extra_args=extra)
             except Exception as e:
                 self.node.get_logger().error(f"Slam update error: {e}")
         threading.Thread(target=worker, daemon=True).start()

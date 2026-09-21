@@ -80,12 +80,12 @@ class ManualDriveManager:
                 pass
         self.launch_log_handles.clear()
 
-    def _start_launch(self, package, launch_file, label):
+    def _start_launch(self, package, launch_file, label, extra_args=None):
         distro = os.environ.get("ROS_DISTRO", "humble")
         ws_setup = os.path.join(HOME_DIR, "waregv", "waregv_ws", "install", "setup.bash")
         ros_setup = f"/opt/ros/{distro}/setup.bash"
         
-        cmd = ["ros2", "launch", package, launch_file]
+        cmd = ["ros2", "launch", package, launch_file] + list(extra_args or [])
             
         quoted = " ".join(subprocess.list2cmdline([x]) for x in cmd)
         shell = f"source {ros_setup} 2>/dev/null || true; source {ws_setup} 2>/dev/null || true; exec {quoted}"
