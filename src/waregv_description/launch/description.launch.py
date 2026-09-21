@@ -2,9 +2,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
-from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.event_handlers import OnProcessStart
+from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -43,11 +43,16 @@ def generate_launch_description():
             "use_sim_time": use_sim_time
         }]
     ) 
-# 2. Main ros2_control_node (runs hardware interface + controller_manager)
+
+    # 2. Main ros2_control_node (runs hardware interface + controller_manager)
     control_node = Node(
         package='controller_manager',
         executable='ros2_control_node',
-        parameters=[robot_description, controllers_yaml_path],
+        # FIXED: Wrapped robot_description inside a dictionary map
+        parameters=[
+            {'robot_description': robot_description},
+            controllers_yaml_path
+        ],
         output='screen'
     )
 
@@ -63,7 +68,7 @@ def generate_launch_description():
     diff_drive_broadcaster_spawner = Node(
         package='controller_manager',
         executable='spawner',
-        arguments=['diff_drive_controller',"--ros-args","-r","/odom:=/odom/wheel"],
+        arguments=['diff_drive_controller', "--ros-args", "-r", "/odom:=/odom/wheel"],
         output='screen'
     )
 

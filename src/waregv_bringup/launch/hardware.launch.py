@@ -19,7 +19,6 @@ def generate_launch_description():
     waregv_bringup_dir = get_package_share_directory("waregv_bringup")
     rosbridge_dir = get_package_share_directory("rosbridge_server")
 
-
     max_linear_velocity_arg = DeclareLaunchArgument(
         name="max_linear_velocity", default_value="0.1"
     )
@@ -61,11 +60,11 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
-    waregv_driver_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_driver"), "launch", "driver.launch.py"
+    waregv_hardware_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_hardware"), "launch", "hardware.launch.py"
     )
-    waregv_driver = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_driver_launch_file_path),
+    waregv_hardware = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_hardware_launch_file_path),
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
@@ -93,7 +92,6 @@ def generate_launch_description():
         ('odometry/filtered', '/odometry/filtered')
     ]
     )
-
 
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
@@ -175,16 +173,14 @@ def generate_launch_description():
     )
 
     return LaunchDescription(
-        [
-            mapping_enable_arg,
-            navigation_enable_arg,
+[
             max_linear_velocity_arg,
             max_angular_velocity_arg,
             wheel_radius_arg,
             wheel_base_arg,
             map_name_arg,
             waregv_description,
-            waregv_driver,
+            waregv_hardware,
             twist_mux_node,
             robot_localization_node,
             waregv_controller,
