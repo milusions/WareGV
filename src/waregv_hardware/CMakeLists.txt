@@ -59,7 +59,7 @@ pluginlib_export_plugin_description_file(
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS 
-  ${PROJECT_NAME}/imu_chasis.py
+  waregv_hardware/imu_chasis.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
