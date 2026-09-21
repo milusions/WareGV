@@ -25,12 +25,7 @@ def generate_launch_description():
         )
 
 
-    imu_chasis_node = Node(
-        package="waregv_hardware",
-        executable="imu_chasis",
-        parameters=[{"use_sim_time": use_sim_time}],
-        output="screen",
-    )
+   
     
 
     realsense_launch = IncludeLaunchDescription(
@@ -54,6 +49,6 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,  
         ydlidar_node,
-        imu_chasis_node,
+      
         # realsense_launch
     ])

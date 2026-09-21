@@ -34,8 +34,13 @@ def generate_launch_description():
          parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "max_linear_vel":LaunchConfiguration('max_linear_velocity'), "max_angular_vel":LaunchConfiguration('max_angular_velocity')}],
         output="screen",
     )
-    
-
+        
+    imu_chasis_node = Node(
+            package="waregv_hardware",
+            executable="imu_chasis",
+            parameters=[{"use_sim_time": use_sim_time}],
+            output="screen",
+        )
     return LaunchDescription([
                                 use_sim_time_arg,
                                 wheel_radius_arg,
@@ -43,6 +48,7 @@ def generate_launch_description():
                             max_linear_velocity_arg,
                             max_angular_velocity_arg,
                               joystick_node,
-                              waregv_controller
+                              waregv_controller,
+                              imu_chasis_node
                               
                              ])
