@@ -22,8 +22,8 @@ done
 echo "Allowing system resources 5 seconds to settle..."
 sleep 5
 
-MAPPING_ENABLE="false"
-NAVIGATION_ENABLE="false"
+MAPPING_ENABLE="true"
+NAVIGATION_ENABLE="true"
 MAX_LINEAR_VELOCITY="0.5"
 MAX_ANGULAR_VELOCITY="3.14159265359"
 WHEEL_RADIUS="0.0325"
