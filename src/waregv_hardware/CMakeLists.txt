@@ -75,7 +75,7 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(DIRECTORY launch waregv_hardware 
+install(DIRECTORY launch 
   DESTINATION share/${PROJECT_NAME}
 )
 
