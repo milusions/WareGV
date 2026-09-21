@@ -1,7 +1,7 @@
 # Blender 5.2.0 LTS
 # www.blender.org
-mtllib waregv_v2_chasis.mtl
-o waregv_v2_chasis
+mtllib chasis.mtl
+o chasis
 v -7.494571 -0.723655 -5.851909
 v -7.489460 -0.723655 -5.813086
 v -7.474475 -0.723655 -5.776909

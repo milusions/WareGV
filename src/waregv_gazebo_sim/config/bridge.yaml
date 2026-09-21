@@ -5,7 +5,7 @@
   direction: GZ_TO_ROS
   lazy: true
 
-- ros_topic_name: "/imu"
+- ros_topic_name: "/imu/chasis"
   gz_topic_name: "/imu"
   ros_type_name: "sensor_msgs/msg/Imu"
   gz_type_name: "gz.msgs.IMU" 
@@ -27,7 +27,6 @@
   direction: GZ_TO_ROS
   lazy: true
   ros_frame: "lidar_link"
-
 
 
 - ros_topic_name: "/camera/image_raw"

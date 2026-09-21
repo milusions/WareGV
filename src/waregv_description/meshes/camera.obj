@@ -1,7 +1,7 @@
 # Blender 5.2.0 LTS
 # www.blender.org
-mtllib waregv_depth_camera.mtl
-o WareGV_Depth_Camera
+mtllib camera.mtl
+o camera
 v -0.721173 0.059877 1.087847
 v -0.725544 0.101460 1.087847
 v -0.738464 0.141224 1.087847

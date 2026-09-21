@@ -1,7 +1,7 @@
 # Blender 5.2.0 LTS
 # www.blender.org
-mtllib waregv_v2_wheel.mtl
-o waregv_v2_wheel
+mtllib wheel.mtl
+o wheel
 v 1.385509 0.239203 -0.086890
 v 1.385509 0.226262 -0.085186
 v 1.385509 0.214203 -0.080191

@@ -24,24 +24,10 @@ def generate_launch_description():
    parameters=[config_file_path, {"reversion": True, "inverted": True}],
         )
 
-    
-    controller_link = Node(
-        package="waregv_driver",
-        executable="controller_link",
-        parameters=[{"use_sim_time": use_sim_time}],
-        output="screen",
-    )
-    
-    motor_encoder = Node(
-        package="waregv_driver",
-        executable="motor_encoder",
-        parameters=[{"use_sim_time": use_sim_time}],
-        output="screen",
-    )
-    
-    imu = Node(
-        package="waregv_driver",
-        executable="imu",
+
+    imu_chasis_node = Node(
+        package="waregv_hardware",
+        executable="imu_chasis",
         parameters=[{"use_sim_time": use_sim_time}],
         output="screen",
     )
@@ -60,16 +46,14 @@ def generate_launch_description():
             'enable_gyro': 'true',
             'unite_imu_method': '2',     
             'enable_infra1': 'true',      
-            'enable_infra2': 'true',       # Right infrared camera for stereo VIO
-            'enable_sync': 'true',         # Hardware timestamp sync
+            'enable_infra2': 'true',       
+            'enable_sync': 'true',    
         }.items()
     )
     
     return LaunchDescription([
         use_sim_time_arg,  
         ydlidar_node,
-        controller_link,
-        motor_encoder,
-        imu,
+        imu_chasis_node,
         # realsense_launch
     ])

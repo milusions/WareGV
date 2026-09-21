@@ -1,7 +1,7 @@
 # Blender 5.2.0 LTS
 # www.blender.org
 mtllib lidar.mtl
-o Lidar
+o lidar
 v -1.421879 0.137737 -3.414828
 v -1.038018 0.137737 -3.392190
 v -0.659479 0.137737 -3.324592

@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot xmlns:xacro="http://ros.org" name="waregv">
 
-    <gazebo reference="wheel_front_left_link">
-        <mu1>2.5</mu1>
-        <mu2>2.5</mu2>
-        <kp>1000000.0</kp> 
-        <kd>10.0</kd>
-        <minDepth>0.001</minDepth>
-        <maxVel>0.1</maxVel>
+    <gazebo>
+        <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+            <parameters>$(find waregv_description)/config/controller.yaml</parameters>
+        </plugin>
+        <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+        <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"/>
     </gazebo>
 
-    <gazebo reference="wheel_rear_left_link">
+    <gazebo reference="wheel_front_left_link">
         <mu1>2.5</mu1>
         <mu2>2.5</mu2>
         <kp>1000000.0</kp>
@@ -28,6 +27,15 @@
         <maxVel>0.1</maxVel>
     </gazebo>
 
+    <gazebo reference="wheel_rear_left_link">
+        <mu1>2.5</mu1>
+        <mu2>2.5</mu2>
+        <kp>1000000.0</kp>
+        <kd>10.0</kd>
+        <minDepth>0.001</minDepth>
+        <maxVel>0.1</maxVel>
+    </gazebo>
+
     <gazebo reference="wheel_rear_right_link">
         <mu1>2.5</mu1>
         <mu2>2.5</mu2>
@@ -37,27 +45,12 @@
         <maxVel>0.1</maxVel>
     </gazebo>
 
-    
-   <gazebo>
-   
-    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-        <parameters>$(find waregv_bringup)/config/controller.yaml</parameters>
-    </plugin>
-    
-   
-    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"></plugin>
-    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"></plugin>
-</gazebo>
-
-
-
     <gazebo reference="base_link">
         <sensor name="imu" type="imu">
             <always_on>true</always_on>
             <update_rate>100</update_rate>
             <topic>/imu</topic>
-           
-            <gz_frame_id>base_link</gz_frame_id> 
+            <gz_frame_id>base_link</gz_frame_id>
             <imu>
                 <angular_velocity>
                     <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
@@ -73,38 +66,14 @@
         </sensor>
     </gazebo>
 
-    <gazebo reference="camera_link">
-        <sensor name="imu_camera" type="imu">
-            <always_on>true</always_on>
-            <update_rate>100</update_rate>
-            <topic>/imu_camera</topic>
-           
-            <gz_frame_id>camera_link</gz_frame_id> 
-            <imu>
-                <angular_velocity>
-                    <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
-                    <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></y>
-                    <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></z>
-                </angular_velocity>
-                <linear_acceleration>
-                    <x><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></x>
-                    <y><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></y>
-                    <z><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></z>
-                </linear_acceleration>
-            </imu>
-        </sensor>
-    </gazebo>
-
-   
     <gazebo reference="lidar_link">
         <sensor name="gpu_lidar" type="gpu_lidar">
-             <pose>0 0 0 0 0 0</pose>
+            <pose>0 0 0 0 0 0</pose>
             <update_rate>10</update_rate>
             <topic>/scan</topic>
             <always_on>true</always_on>
             <visualize>true</visualize>
-            <!-- Fixed for Gazebo Harmonic -->
-            <gz_frame_id>lidar_link</gz_frame_id> 
+            <gz_frame_id>lidar_link</gz_frame_id>
             <lidar>
                 <scan>
                     <horizontal>
@@ -128,30 +97,44 @@
         </sensor>
     </gazebo>
 
-   
-   
-    
     <gazebo reference="camera_link">
         <sensor name="camera" type="camera">
-             <pose>0 0 0 0 0 -0.1</pose>
+            <pose>0 0 0 0 0 -0.1</pose>
             <update_rate>30</update_rate>
             <topic>/camera/image_raw</topic>
             <always_on>true</always_on>
             <visualize>true</visualize>
-            <gz_frame_id>camera_link</gz_frame_id> 
+            <gz_frame_id>camera_link</gz_frame_id>
             <camera>
-                <!-- D435i RGB horizontal FOV is exactly 69.4 degrees -->
-                <horizontal_fov>1.211258</horizontal_fov> 
+                <horizontal_fov>1.211258</horizontal_fov>
                 <image>
                     <width>1920</width>
                     <height>1080</height>
                     <format>R8G8B8</format>
                 </image>
                 <clip>
-                    <near>0.1</near> 
+                    <near>0.1</near>
                     <far>10.0</far>
                 </clip>
             </camera>
+        </sensor>
+        <sensor name="imu_camera" type="imu">
+            <always_on>true</always_on>
+            <update_rate>100</update_rate>
+            <topic>/imu_camera</topic>
+            <gz_frame_id>camera_link</gz_frame_id>
+            <imu>
+                <angular_velocity>
+                    <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
+                    <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></y>
+                    <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></z>
+                </angular_velocity>
+                <linear_acceleration>
+                    <x><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></x>
+                    <y><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></y>
+                    <z><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></z>
+                </linear_acceleration>
+            </imu>
         </sensor>
     </gazebo>
 
