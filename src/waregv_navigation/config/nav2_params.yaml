@@ -282,10 +282,10 @@ velocity_smoother:
     stamp_smoothed_velocity_with_smoothing_time: False
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.3, 0.0, 1.57]
-    min_velocity: [-0.3, 0.0, -1.57]
-    max_accel: [0.15, 0.0, 4.0]
-    max_decel: [-0.15, 0.0, -4.0]
+    max_velocity: [0.1, 0.0, 1.57]
+    min_velocity: [-0.1, 0.0, -1.57]
+    max_accel: [0.1, 0.0, 4.0]
+    max_decel: [-0.1, 0.0, -4.0]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
