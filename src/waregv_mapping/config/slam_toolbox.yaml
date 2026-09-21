@@ -25,6 +25,13 @@ slam_toolbox:
     base_frame: base_footprint                 # Robot base root frame ID
     scan_topic: /scan                          # Incoming LaserScan topic
     use_map_saver: true                        # Enable automatic map saving service interface
+    
+    # Path where the map will be continuously written (.pgm, .yaml, and .posegraph)
+    # Ensure the target directory exists and the ROS user has write permissions!
+    map_file_name: "/home/ubuntu/waregv/waregv_ws/src/waregv_mapping/maps/autosaved_map"
+
+    # Interval in seconds to automatically write updated map files to disk
+    map_save_interval: 10.0   # Saves the map to disk every 10 seconds
     mode: mapping                              # Operating mode: "mapping" (online continuous) or "localization"
 
     # --- Pose Serialization & Continued Mapping (Optional) ---

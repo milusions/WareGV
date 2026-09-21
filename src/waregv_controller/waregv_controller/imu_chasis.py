@@ -11,7 +11,7 @@ class IMUChasis(Node):
         super().__init__('imu_node')
         self.pub = self.create_publisher(Imu, '/imu/chasis', 10)
         
-        # Initialize I2C Bus 3 and the BNO055 sensor
+        # Initialize I2C Bus 1 and the BNO055 sensor
         self.i2c = I2C(1)
         self.bno = adafruit_bno055.BNO055_I2C(self.i2c)
         
@@ -27,7 +27,7 @@ class IMUChasis(Node):
 
         # 100 Hz timer loop (0.01 seconds)
         self.create_timer(0.01, self.read_and_publish)
-        self.get_logger().info("IMU Chasis Node running on I2C3 -> /imu/chasis")
+        self.get_logger().info("IMU Chasis Node running on I2C1 -> /imu/chasis")
 
     def read_and_publish(self):
         try:
@@ -36,31 +36,35 @@ class IMUChasis(Node):
             gyro = self.bno.gyro
             accel = self.bno.linear_acceleration
 
-            # I2C can occasionally drop a frame returning None; skip if invalid
-            if None in (quat, gyro, accel):
+            # 1. Ensure all read containers exist
+            if quat is None or gyro is None or accel is None:
                 return
 
-            # Update pre-allocated message
+            # 2. Ensure NO individual element inside tuples is None
+            if any(v is None for v in quat) or any(v is None for v in gyro) or any(v is None for v in accel):
+                return
+
+            # Update pre-allocated message timestamp
             self.msg.header.stamp = self.get_clock().now().to_msg()
 
-            # Map Adafruit Quaternion (W,X,Y,Z) to ROS 2 standard (X,Y,Z,W)
-            self.msg.orientation.x = quat[1]
-            self.msg.orientation.y = quat[2]
-            self.msg.orientation.z = quat[3]
-            self.msg.orientation.w = quat[0]
+            # Map Adafruit Quaternion (W,X,Y,Z) to ROS 2 standard (X,Y,Z,W) with explicit float casting
+            self.msg.orientation.x = float(quat[1])
+            self.msg.orientation.y = float(quat[2])
+            self.msg.orientation.z = float(quat[3])
+            self.msg.orientation.w = float(quat[0])
 
-            self.msg.angular_velocity.x = gyro[0]
-            self.msg.angular_velocity.y = gyro[1]
-            self.msg.angular_velocity.z = gyro[2]
+            self.msg.angular_velocity.x = float(gyro[0])
+            self.msg.angular_velocity.y = float(gyro[1])
+            self.msg.angular_velocity.z = float(gyro[2])
 
-            self.msg.linear_acceleration.x = accel[0]
-            self.msg.linear_acceleration.y = accel[1]
-            self.msg.linear_acceleration.z = accel[2]
+            self.msg.linear_acceleration.x = float(accel[0])
+            self.msg.linear_acceleration.y = float(accel[1])
+            self.msg.linear_acceleration.z = float(accel[2])
 
             self.pub.publish(self.msg)
 
-        except OSError:
-            # Silently catch occasional I2C bus I/O errors to keep the high-speed loop alive
+        except (OSError, RuntimeError, TypeError, ValueError):
+            # Silently catch occasional I2C bus read glitches to keep the loop active
             pass
 
 def main(args=None):
@@ -72,7 +76,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        if rclpy.ok(): rclpy.shutdown()
+        if rclpy.ok(): 
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
