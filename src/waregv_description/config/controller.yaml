@@ -49,7 +49,7 @@ differential_drive_controller:
     # --- Hardware Feedback & Execution Options ---
     position_feedback: false          # Set true if hardware joints provide position feedback instead of velocity
     open_loop: false                  # Set true to calculate odometry strictly from sent command velocities rather than hardware feedback
-    enable_odom_tf: true              # Set true to publish calculated dynamic transform from odom -> base_footprint
+    enable_odom_tf: false              # Set true to publish calculated dynamic transform from odom -> base_footprint
 
     # --- Safety & Dynamic Filtering ---
     cmd_vel_timeout: 0.5              # Time threshold in seconds; if no cmd_vel received within this period, wheels stop

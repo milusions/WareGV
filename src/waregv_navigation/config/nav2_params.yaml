@@ -69,8 +69,8 @@ amcl:
 bt_navigator:
   ros__parameters:
     global_frame: map                 # Global reference frame
-    robot_base_frame: base_link       # Robot base frame
-    odom_topic: /odom                 # Odometry topic used for internal tracking
+    robot_base_frame: base_footprint       # Robot base frame
+    odom_topic:    /odometry/filtered              # Odometry topic used for internal tracking
     bt_loop_duration: 10              # Duration (ms) of each execution step of the Behavior Tree
     default_server_timeout: 20        # Timeout (ms) when waiting for action servers to respond
     wait_for_service_timeout: 1000    # Timeout (ms) when waiting for critical services
@@ -181,7 +181,7 @@ local_costmap:
       update_frequency: 5.0           # Costmap recalculation frequency (Hz)
       publish_frequency: 2.0          # Costmap ROS 2 topic publish frequency (Hz)
       global_frame: odom              # Local costmap operates relative to odometry frame
-      robot_base_frame: base_link      # Robot baseline transform frame
+      robot_base_frame: base_footprint      # Robot baseline transform frame
       rolling_window: true            # Keep grid centered dynamically on the robot
       width: 3                        # Grid width (meters)
       height: 3                       # Grid height (meters)
@@ -237,7 +237,7 @@ global_costmap:
       update_frequency: 1.0           # Global costmap calculation rate (Hz)
       publish_frequency: 1.0          # Global costmap topic publication rate (Hz)
       global_frame: map               # Operates in global map frame
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       robot_radius: 0.22              # Circular footprint approximation radius (meters)
       resolution: 0.05                # Grid cell size matching overall map resolution
       track_unknown_space: true       # Treat unmapped cells as unknown space instead of free space
@@ -323,7 +323,7 @@ behavior_server:
     cycle_frequency: 10.0             # Loop execution rate (Hz)
     local_frame: odom
     global_frame: map
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     transform_tolerance: 0.1
     simulate_ahead_time: 2.0          # Collision checking horizon during recovery steps
 
@@ -464,7 +464,7 @@ docking_server:
     undock_linear_tolerance: 0.05     # Distance tolerance for un-docking maneuver completion
     undock_angular_tolerance: 0.1      # Angle tolerance for un-docking maneuver completion
     max_retries: 3                    # Docking attempt retries on failure
-    base_frame: "base_link"
+    base_frame: "base_footprint"
     fixed_frame: "odom"
     dock_backwards: false             # Set true if charging contacts are on the rear
     dock_prestaging_tolerance: 0.5    # Approach staging area tolerance

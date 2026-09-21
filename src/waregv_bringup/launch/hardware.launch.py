@@ -89,6 +89,9 @@ def generate_launch_description():
         executable="ekf_node",
         name="ekf_filter_node",
         parameters=[efk_node_params_file],
+        remappings=[
+        ('odometry/filtered', '/odometry/filtered')
+    ]
     )
 
 
