@@ -27,7 +27,7 @@ class IMUChasis(Node):
 
         # 100 Hz timer loop (0.01 seconds)
         self.create_timer(0.01, self.read_and_publish)
-        self.get_logger().info("Fast BNO055 Node running on I2C3 -> /imu/chasis")
+        self.get_logger().info("IMU Chasis Node running on I2C3 -> /imu/chasis")
 
     def read_and_publish(self):
         try:
@@ -65,7 +65,7 @@ class IMUChasis(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ChasisIMU()
+    node = IMUChasis()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
