@@ -12,7 +12,7 @@ class IMUChasis(Node):
         self.pub = self.create_publisher(Imu, '/imu/chasis', 10)
         
         # Initialize I2C Bus 3 and the BNO055 sensor
-        self.i2c = I2C(3)
+        self.i2c = I2C(1)
         self.bno = adafruit_bno055.BNO055_I2C(self.i2c)
         
         # Pre-allocate message to eliminate loop memory allocation overhead
