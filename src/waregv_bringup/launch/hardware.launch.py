@@ -193,5 +193,6 @@ def generate_launch_description():
         waregv_odometry,
         waregv_controller,
        waregv_mapping,
-       waregv_navigation
+       waregv_navigation,
+       waregv_web_dashboard
     ])
