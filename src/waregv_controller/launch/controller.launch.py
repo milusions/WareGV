@@ -36,7 +36,7 @@ def generate_launch_description():
     )
         
     imu_chasis_node = Node(
-            package="waregv_hardware",
+            package="waregv_controller",
             executable="imu_chasis",
             parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
             output="screen",
