@@ -40,6 +40,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
+                "commander=waregv_dashboard.commander:main",
+                        "commander_rest_server=waregv_dashboard.commander_rest_server_node:main"
         ],
     },
 )

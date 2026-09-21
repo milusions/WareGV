@@ -12,14 +12,14 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='true')
  
     commander_node = Node(
-        package="waregv_navigation",
+        package="waregv_dashboard",
         executable="commander",
         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
         output="screen",
     )
     
     commander_rest_server_node = Node(
-        package="waregv_navigation",
+        package="waregv_dashboard",
         executable="commander_rest_server",
         parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time")}],
         output="screen",

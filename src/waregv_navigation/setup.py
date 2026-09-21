@@ -39,8 +39,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "commander=waregv_navigation.commander:main",
-            "commander_rest_server=waregv_navigation.commander_rest_server_node:main"
+        
         ],
     },
 )
