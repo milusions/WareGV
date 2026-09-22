@@ -306,6 +306,7 @@ collision_monitor:
       time_before_collision: 0.5
       simulation_time_step: 0.1
       min_points: 6
+      max_points: 6
       visualize: False
       enabled: True
     observation_sources: ["scan"]
