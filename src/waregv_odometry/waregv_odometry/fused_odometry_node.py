@@ -29,7 +29,7 @@ class FusedOdometryNode(Node):
         # Let's set up some parameters. 
         # This is great because we can change the wheel size or calibrate the gyro 
         # from a launch file without having to touch this Python code again.
-        self.declare_parameter('wheel_radius', 0.035) # 3.5 cm radius by default
+        self.declare_parameter('wheel_radius', 0.036) # 3.6 cm radius by default
         self.declare_parameter('gyro_bias_z', 0.0)    # How much the IMU drifts when sitting still
         
         # Set up our megaphones (Publishers)

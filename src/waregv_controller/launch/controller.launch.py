@@ -9,8 +9,8 @@ def generate_launch_description():
     
     max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.5")
     max_angular_velocity_arg = DeclareLaunchArgument(name="max_angular_velocity", default_value=str(np.pi))
-    wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.0385')
-    wheel_base_arg = DeclareLaunchArgument(name="wheel_base", default_value='0.158')
+    wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.036')
+    track_width_arg = DeclareLaunchArgument(name="track_width", default_value='0.192')
     
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='true')
     
@@ -38,7 +38,7 @@ def generate_launch_description():
     return LaunchDescription([
                                 use_sim_time_arg,
                                 wheel_radius_arg,
-                                wheel_base_arg,
+                                track_width_arg,
                                  max_linear_velocity_arg,
                                 max_angular_velocity_arg,
                               joystick_node,

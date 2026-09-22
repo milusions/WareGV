@@ -30,10 +30,10 @@ def generate_launch_description():
         name="max_angular_velocity", default_value=str(np.pi / 4)
     )
     wheel_radius_arg = DeclareLaunchArgument(
-        name="wheel_radius", default_value="0.0385"
+        name="wheel_radius", default_value="0.036"
     )
-    wheel_base_arg = DeclareLaunchArgument(
-        name="wheel_base", default_value="0.158"
+    track_width_arg = DeclareLaunchArgument(
+        name="track_width", default_value="0.192"
     )
     model_arg = DeclareLaunchArgument(
         name="model", default_value="waregv.urdf.xacro"
@@ -43,7 +43,7 @@ def generate_launch_description():
     max_linear_velocity_conf = LaunchConfiguration("max_linear_velocity")
     max_angular_velocity_conf = LaunchConfiguration("max_angular_velocity")
     wheel_radius_conf = LaunchConfiguration("wheel_radius")
-    wheel_base_conf = LaunchConfiguration("wheel_base")
+    track_width_conf = LaunchConfiguration("track_width")
     world_name_conf = LaunchConfiguration("world_name")
     model_conf = LaunchConfiguration("model")
     robot_spawn_z = LaunchConfiguration("spawn_z")
@@ -165,7 +165,7 @@ def generate_launch_description():
             "max_angular_velocity": max_angular_velocity_conf,
             "max_linear_velocity": max_linear_velocity_conf,
             "wheel_radius": wheel_radius_conf,
-            "wheel_base": wheel_base_conf,
+            "track_width": track_width_conf,
         }.items(),
     )
 
@@ -209,7 +209,7 @@ def generate_launch_description():
             max_linear_velocity_arg,
             max_angular_velocity_arg,
             wheel_radius_arg,
-            wheel_base_arg,
+            track_width_arg,
             model_arg,
             waregv_urdf,
             rosbridge_node,

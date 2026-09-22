@@ -26,8 +26,8 @@ NAVIGATION_ENABLE="false"
 WORLD_NAME="small_warehouse"
 MAX_LINEAR_VELOCITY="0.5"
 MAX_ANGULAR_VELOCITY="3.14159265359"
-WHEEL_RADIUS="0.0325"
-WHEEL_BASE="0.176"
+WHEEL_RADIUS="0.036"
+track_width="0.192"
 MODEL="waregv.urdf.xacro"
 SPAWN_Z="0.5"
 MAP_NAME="small_warehouse"
@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --wheel-base)
-            WHEEL_BASE="$2"
+            track_width="$2"
             shift 2
             ;;
         --model)
@@ -108,7 +108,7 @@ stdbuf -oL -eL ros2 launch waregv_bringup simulation.launch.py \
     max_linear_velocity:="$MAX_LINEAR_VELOCITY" \
     max_angular_velocity:="$MAX_ANGULAR_VELOCITY" \
     wheel_radius:="$WHEEL_RADIUS" \
-    wheel_base:="$WHEEL_BASE" \
+    track_width:="$track_width" \
     model:="$MODEL" \
     spawn_z:="$SPAWN_Z" \
     map_name:="$MAP_NAME" > "$LOG_FILE" 2>&1 &
