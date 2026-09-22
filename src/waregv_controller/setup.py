@@ -42,6 +42,7 @@ setup(
     entry_points={
         'console_scripts': [
             "joystick_relay=waregv_controller.joystick_relay:main",
+            "diff_drive_kinematics_relay=waregv_controller.diff_drive_kinematics_relay:main",
                       
                         
         ],

@@ -33,6 +33,13 @@ def generate_launch_description():
          parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "max_linear_vel":LaunchConfiguration('max_linear_velocity'), "max_angular_vel":LaunchConfiguration('max_angular_velocity')}],
         output="screen",
     )
+    
+    diff_drive_kinematics_relay_node = Node(
+            package="waregv_controller",
+            executable="diff_drive_kinematics_relay",
+             parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "wheel_R":LaunchConfiguration('wheel_radius'), "track_width":LaunchConfiguration('track_width')}],
+            output="screen",
+        )
         
 
     return LaunchDescription([
@@ -43,5 +50,5 @@ def generate_launch_description():
                                 max_angular_velocity_arg,
                               joystick_node,
                               waregv_controller,
-                
+                diff_drive_kinematics_relay_node
                              ])
