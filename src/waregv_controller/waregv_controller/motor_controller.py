@@ -40,6 +40,13 @@ class WareGVHardwareNode(Node):
         self.declare_parameter('base_frame_id', 'base_footprint')
         self.declare_parameter('publish_tf', True)
 
+        # --- Individual Wheel Direction Inversion Flags ---
+        # Change to True if a specific motor rotates backward relative to its intended direction
+        self.declare_parameter('invert_fl', True)   # Front-Left (ID 1 on left port)
+        self.declare_parameter('invert_rl', False)  # Rear-Left  (ID 2 on left port) - FLIPPED TO FIX LEFT TURN
+        self.declare_parameter('invert_fr', False)  # Front-Right (ID 1 on right port)
+        self.declare_parameter('invert_rr', False)  # Rear-Right (ID 2 on right port)
+
         self.port_left_name = self.get_parameter('port_left').value
         self.port_right_name = self.get_parameter('port_right').value
         self.baud_rate = self.get_parameter('baud_rate').value
@@ -49,8 +56,13 @@ class WareGVHardwareNode(Node):
         self.base_frame = self.get_parameter('base_frame_id').value
         self.publish_tf = self.get_parameter('publish_tf').value
 
-        # STS3215 Conversion Constants
-        # 1 Raw Speed Unit ≈ 0.007667 rad/s (1 unit ~ 0.0732 RPM)
+        # Numerical multipliers (-1.0 = inverted, 1.0 = normal)
+        self.fl_dir = -1.0 if self.get_parameter('invert_fl').value else 1.0
+        self.rl_dir = -1.0 if self.get_parameter('invert_rl').value else 1.0
+        self.fr_dir = -1.0 if self.get_parameter('invert_fr').value else 1.0
+        self.rr_dir = -1.0 if self.get_parameter('invert_rr').value else 1.0
+
+        # STS3215 Conversion Constants (1 unit ≈ 0.007667 rad/s)
         self.RAW_VEL_TO_RADS = 0.007667
 
         # --- Serial Communication Setup ---
@@ -58,9 +70,11 @@ class WareGVHardwareNode(Node):
         self.ser_right = None
         self.init_serial()
 
-        # Configured Servo IDs (Left: FL=1, RL=2; Right: FR=1, RR=2)
-        self.left_ids = [1, 2]
-        self.right_ids = [1, 2]
+        # Servo ID Assignments
+        self.fl_id = 1  # Front-Left on Left Port
+        self.rl_id = 2  # Rear-Left on Left Port
+        self.fr_id = 1  # Front-Right on Right Port
+        self.rr_id = 2  # Rear-Right on Right Port
 
         self.init_servos()
 
@@ -72,9 +86,11 @@ class WareGVHardwareNode(Node):
             'wheel_rear_right_joint',
         ]
 
-        # Robot State Variables
-        self.left_cmd_vel = 0.0   # rad/s
-        self.right_cmd_vel = 0.0  # rad/s
+        # Robot State Variables (Individual wheel commands in rad/s)
+        self.fl_cmd_vel = 0.0
+        self.rl_cmd_vel = 0.0
+        self.fr_cmd_vel = 0.0
+        self.rr_cmd_vel = 0.0
 
         self.joint_pos = [0.0, 0.0, 0.0, 0.0]  # rad
         self.joint_vel = [0.0, 0.0, 0.0, 0.0]  # rad/s
@@ -95,7 +111,7 @@ class WareGVHardwareNode(Node):
 
         # Main Hardware Update Loop (50 Hz = 20 ms)
         self.timer = self.create_timer(0.02, self.update_loop)
-        self.get_logger().info('WareGV Hardware Node Started Successfully!')
+        self.get_logger().info('WareGV Hardware Node Started with Independent 4-Wheel Control!')
 
     def init_serial(self):
         try:
@@ -123,10 +139,9 @@ class WareGVHardwareNode(Node):
         return bytes([0xFF, 0xFF, id, length, instruction] + params + [checksum])
 
     def init_servos(self):
-        # Configure wheel mode (Register 0x21 = 1)
+        # Configure broadcast wheel mode (Register 0x21 = 1)
         for ser in set([self.ser_left, self.ser_right]):
             if ser and ser.is_open:
-                # Set broadcast wheel mode
                 ser.write(self.make_packet(0xFE, 0x03, [0x21, 0x01]))
                 time.sleep(0.01)
 
@@ -138,36 +153,49 @@ class WareGVHardwareNode(Node):
         v_left = v - (w * self.W / 2.0)
         v_right = v + (w * self.W / 2.0)
 
-        left_direction = -1.0
-        right_direction = 1.0
+        # Convert linear velocity to base wheel angular velocity (rad/s)
+        omega_left = v_left / self.R
+        omega_right = v_right / self.R
 
-        # Convert wheel linear velocity (m/s) to angular velocity (rad/s) with inverted direction
-        self.left_cmd_vel = (v_left / self.R) * left_direction
-        self.right_cmd_vel = (v_right / self.R) * right_direction
+        # Calculate 4 independent wheel commands using individual direction multipliers
+        self.fl_cmd_vel = omega_left * self.fl_dir
+        self.rl_cmd_vel = omega_left * self.rl_dir
+        self.fr_cmd_vel = omega_right * self.fr_dir
+        self.rr_cmd_vel = omega_right * self.rr_dir
 
     def rads_to_raw_speed(self, rad_s):
         raw_speed = int(abs(rad_s) / self.RAW_VEL_TO_RADS)
-        raw_speed = min(raw_speed, 4095)  # Cap max hardware limit
+        raw_speed = min(raw_speed, 4095)  # Cap hardware max
         if rad_s < 0.0:
             raw_speed |= 0x8000  # Set direction bit
         return raw_speed
 
     def send_wheel_commands(self):
-        # Left side commands
-        raw_l = self.rads_to_raw_speed(self.left_cmd_vel)
-        bytes_l = [raw_l & 0xFF, (raw_l >> 8) & 0xFF]
+        # Convert each wheel velocity independently
+        raw_fl = self.rads_to_raw_speed(self.fl_cmd_vel)
+        raw_rl = self.rads_to_raw_speed(self.rl_cmd_vel)
+        raw_fr = self.rads_to_raw_speed(self.fr_cmd_vel)
+        raw_rr = self.rads_to_raw_speed(self.rr_cmd_vel)
 
-        # Right side commands
-        raw_r = self.rads_to_raw_speed(self.right_cmd_vel)
-        bytes_r = [raw_r & 0xFF, (raw_r >> 8) & 0xFF]
+        bytes_fl = [raw_fl & 0xFF, (raw_fl >> 8) & 0xFF]
+        bytes_rl = [raw_rl & 0xFF, (raw_rl >> 8) & 0xFF]
+        bytes_fr = [raw_fr & 0xFF, (raw_fr >> 8) & 0xFF]
+        bytes_rr = [raw_rr & 0xFF, (raw_rr >> 8) & 0xFF]
 
+        # Send individual packets to Front-Left (ID 1) and Rear-Left (ID 2)
         if self.ser_left and self.ser_left.is_open:
-            for id in self.left_ids:
-                self.ser_left.write(self.make_packet(id, 0x03, [0x2E] + bytes_l))
+            self.ser_left.write(self.make_packet(self.fl_id, 0x03, [0x2E] + bytes_fl))
+            self.ser_left.write(self.make_packet(self.rl_id, 0x03, [0x2E] + bytes_rl))
 
+        # Send individual packets to Front-Right (ID 1) and Rear-Right (ID 2)
         if self.ser_right and self.ser_right.is_open:
-            for id in self.right_ids:
-                self.ser_right.write(self.make_packet(id, 0x03, [0x2E] + bytes_r))
+            if self.ser_left != self.ser_right:
+                self.ser_right.write(self.make_packet(self.fr_id, 0x03, [0x2E] + bytes_fr))
+                self.ser_right.write(self.make_packet(self.rr_id, 0x03, [0x2E] + bytes_rr))
+            else:
+                # If running single bus, send right-side commands on left serial port
+                self.ser_left.write(self.make_packet(self.fr_id, 0x03, [0x2E] + bytes_fr))
+                self.ser_left.write(self.make_packet(self.rr_id, 0x03, [0x2E] + bytes_rr))
 
     def update_loop(self):
         current_time = self.get_clock().now()
@@ -182,10 +210,10 @@ class WareGVHardwareNode(Node):
 
         # 2. Update Joint State Feedback
         self.joint_vel = [
-            self.left_cmd_vel,   # FL
-            self.right_cmd_vel,  # FR
-            self.left_cmd_vel,   # RL
-            self.right_cmd_vel,  # RR
+            self.fl_cmd_vel,  # FL
+            self.fr_cmd_vel,  # FR
+            self.rl_cmd_vel,  # RL
+            self.rr_cmd_vel,  # RR
         ]
 
         for i in range(4):
@@ -199,9 +227,9 @@ class WareGVHardwareNode(Node):
         js_msg.velocity = self.joint_vel
         self.pub_joint_states.publish(js_msg)
 
-        # 3. Calculate Differential Drive Odometry
-        v_l_actual = self.left_cmd_vel * self.R
-        v_r_actual = self.right_cmd_vel * self.R
+        # 3. Calculate Differential Drive Odometry using effective wheel motion
+        v_l_actual = ((self.fl_cmd_vel * self.fl_dir) + (self.rl_cmd_vel * self.rl_dir)) / 2.0 * self.R
+        v_r_actual = ((self.fr_cmd_vel * self.fr_dir) + (self.rr_cmd_vel * self.rr_dir)) / 2.0 * self.R
 
         linear_v = (v_r_actual + v_l_actual) / 2.0
         angular_v = (v_r_actual - v_l_actual) / self.W
