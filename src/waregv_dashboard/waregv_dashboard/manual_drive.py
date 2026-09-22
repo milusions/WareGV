@@ -31,7 +31,10 @@ class ManualDriveManager:
         return self._start_launch("waregv_mapping", "mapping.launch.py", label="MANUAL_SLAM")
 
     def save_map(self, map_name: str):
-        """Synchronous. Saves .pgm/.yaml (map_saver) AND .posegraph/.data (slam_toolbox).
+        """Synchronous. Saves .pgm/.yaml only (map_saver_cli).
+        The slam_toolbox pose graph (.posegraph/.data) is intentionally NOT
+        required or saved anymore, since the rover no longer supports the
+        "update an existing map" mode that needed it.
         Returns list of files written; raises on failure."""
         name = (map_name or "").strip()
         if not name:
@@ -43,19 +46,13 @@ class ManualDriveManager:
         r1 = self._run_command(["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", base])
         self.node.get_logger().info(f"map_saver rc={r1.returncode} {r1.stderr.strip()[-200:]}")
 
-        if not self._wait_for_ros_service("/slam_toolbox/serialize_map", 10):
-            raise RuntimeError("slam_toolbox serialize_map service unavailable (is SLAM running?)")
-        req = "{filename: '" + base.replace("'", "''") + "'}"
-        r2 = self._run_command([
-            "ros2", "service", "call", "/slam_toolbox/serialize_map",
-            "slam_toolbox/srv/SerializePoseGraph", req
-        ])
-        self.node.get_logger().info(f"serialize_map rc={r2.returncode} out={r2.stdout.strip()[-200:]}")
-
-        written = [e for e in (".pgm", ".yaml", ".posegraph", ".data") if os.path.exists(base + e)]
-        missing = [e for e in (".pgm", ".yaml", ".posegraph", ".data") if e not in written]
+        written = [e for e in (".pgm", ".yaml") if os.path.exists(base + e)]
+        missing = [e for e in (".pgm", ".yaml") if e not in written]
         if missing:
-            raise RuntimeError("Save incomplete, missing: " + ", ".join(missing))
+            raise RuntimeError(
+                "Save incomplete, missing: " + ", ".join(missing) +
+                (f" (map_saver_cli rc={r1.returncode}: {r1.stderr.strip()[-300:]})" if r1.returncode != 0 else "")
+            )
         return written
 
     def kill_processes(self):

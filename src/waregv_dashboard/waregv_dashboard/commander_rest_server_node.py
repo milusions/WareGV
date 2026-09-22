@@ -41,6 +41,10 @@ app.add_middleware(
 )
 
 HOME_DIR = os.path.expanduser("~")
+# The rover always boots into autonomous driving + a brand-new SLAM map, so it
+# needs some starting name for that map. Change this (or pass STARTUP_MAP_NAME
+# env var) if you want the boot map called something else.
+STARTUP_MAP_NAME = os.environ.get("STARTUP_MAP_NAME", "startup_map")
 SLAM_MAP_ROOT = os.path.join(HOME_DIR, "waregv", "waregv_ws", "src", "waregv_mapping", "maps")
 WEB_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "web")
 HTML_FILE_PATH = os.path.join(WEB_DIR, "index.html")
@@ -140,47 +144,32 @@ class CommanderRestAPINode(Node):
                 return None
 
     def switch_system_mode(self, mode: str, map_name: str):
-        if mode == "nav":
-            base = os.path.join(SLAM_MAP_ROOT, map_name, map_name)
-            missing = [e for e in (".posegraph", ".data") if not os.path.exists(base + e)]
-            if missing:
-                raise ValueError(
-                    f"Map '{map_name}' has no SLAM pose graph (missing {', '.join(missing)}). "
-                    "Map update needs .posegraph + .data (created by Save Map in a SLAM mode). "
-                    "Upload them with the map, or re-map and save.")
+        """Only two modes exist now:
+          * "manual"      - joystick driving, no SLAM/Nav2
+          * "slam_update" - autonomous driving + SLAM mapping a NEW map (always
+                             starts from scratch; there is no "update an
+                             existing map" mode anymore).
+        """
+        if mode not in ("manual", "slam_update"):
+            raise ValueError(f"Unknown mode '{mode}' (valid modes: manual, slam_update)")
+
         with self.mode_lock:
             self.requested_mode = mode
             self.manual_manager.kill_processes()
             self.autonomous_manager.kill_processes()
             time.sleep(1.0)
-            
+
             if mode == "manual":
                 self.get_logger().info("Switched to Manual Mode.")
-            elif mode == "slam":
-                self.manual_manager.start_slam_mapping()
             elif mode == "slam_update":   # autonomous + NEW mapping from scratch
                 self.autonomous_manager.start_slam_update_mode(map_name, self.manual_manager, load_existing=False)
-            elif mode == "nav":           # autonomous + UPDATE an existing (uploaded) map
-                self.autonomous_manager.start_slam_update_mode(map_name, self.manual_manager, load_existing=True)
-            else:
-                raise ValueError(f"Unknown mode '{mode}'")
 
     def detect_mode(self):
         names = [n.lower() for n in self.get_node_names()]
         has_slam = any("slam_toolbox" in n or n == "slam" for n in names)
         has_nav = any("bt_navigator" in n for n in names)
-        if self.requested_mode in ("slam_update", "nav") and has_slam and has_nav:
-            return self.requested_mode
-        if self.requested_mode == "slam" and has_slam:
-            return "slam"
-        if self.requested_mode == "nav" and has_nav:
-            return "nav"
         if has_slam and has_nav:
             return "slam_update"
-        if has_slam:
-            return "slam"
-        if has_nav:
-            return "nav"
         return "manual"
 
     def navigate_to_pose(self, x, y, yaw=0.0, yaw_deg=None):
@@ -348,9 +337,7 @@ def http_maps():
             d = os.path.join(root, name)
             if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.yaml")):
                 maps.append(name)
-    updatable = [m for m in maps if os.path.exists(os.path.join(root, m, f"{m}.posegraph"))
-                 and os.path.exists(os.path.join(root, m, f"{m}.data"))]
-    return {"maps": maps, "updatable": updatable}
+    return {"maps": maps}
 
 @app.post("/maps")
 def http_create_map(req: MapRequest):
@@ -576,8 +563,8 @@ def http_slam_status():
 @app.post("/manual_drive")
 def http_manual_drive(req: DriveRequest):
     mode = api_node.detect_mode()
-    if mode not in ["manual", "slam"]:
-        raise HTTPException(409, f"Manual drive requires manual or slam mode; current mode is {mode}")
+    if mode != "manual":
+        raise HTTPException(409, f"Manual drive requires manual mode; current mode is {mode}")
     if abs(req.linear) > 1.0 or abs(req.angular) > 1.0:
         raise HTTPException(400, "linear and angular must be within [-1, 1]")
     api_node.manual_manager.publish_joy(req.linear, req.angular)
@@ -634,6 +621,15 @@ def main():
     api_node = CommanderRestAPINode()
     ros_thread = threading.Thread(target=rclpy.spin, args=(api_node,), daemon=True)
     ros_thread.start()
+
+    # The rover always starts in autonomous driving + new mapping mode.
+    try:
+        api_node.switch_system_mode("slam_update", STARTUP_MAP_NAME)
+        api_node.get_logger().info(
+            f"Boot: auto-started autonomous driving + new mapping mode (map='{STARTUP_MAP_NAME}').")
+    except Exception as e:
+        api_node.get_logger().error(f"Failed to auto-start slam_update mode on boot: {e}")
+
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000)
     finally:
