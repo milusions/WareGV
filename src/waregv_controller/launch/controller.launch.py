@@ -39,8 +39,8 @@ def generate_launch_description():
                                 use_sim_time_arg,
                                 wheel_radius_arg,
                                 wheel_base_arg,
-                            max_linear_velocity_arg,
-                            max_angular_velocity_arg,
+                                 max_linear_velocity_arg,
+                                max_angular_velocity_arg,
                               joystick_node,
                               waregv_controller,
                 
