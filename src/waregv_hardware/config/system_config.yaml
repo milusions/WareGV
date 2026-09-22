@@ -1,7 +1,7 @@
 # Hardware definitions
 ports:
-  - "/dev/ttyACM3"
-  - "/dev/ttyACM5"
+  - "/dev/ttyAMA3"
+  - "/dev/ttyAMA5"
 
 servo_ids: [1, 2] 
 

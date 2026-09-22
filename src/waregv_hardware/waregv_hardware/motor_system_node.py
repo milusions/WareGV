@@ -14,12 +14,17 @@ class MotorSystemNode(Node):
 
         # Maximum motor angular velocity limit in rad/s
         self.max_angular_velocity = 9.0
-
+        self.rpm_inversion_config = {
+                    "fl": 1,
+                    "fr": -1, 
+                    "rl": 1,
+                    "rr": -1  
+                }
         # 1. Declare configuration and hardware port/servo ID parameters
         default_config = os.path.join(get_package_share_directory("waregv_hardware"), "config", "system_config.yaml")
         self.declare_parameter(name="config_file", value=default_config)
-        self.declare_parameter(name="port_name_left", value="/dev/ttyACM3")
-        self.declare_parameter(name="port_name_right", value="/dev/ttyACM5")
+        self.declare_parameter(name="port_name_left", value="/dev/ttyAMA3")
+        self.declare_parameter(name="port_name_right", value="/dev/ttyAMA5")
         self.declare_parameter(name="front_servo_id", value=1)
         self.declare_parameter(name="rear_servo_id", value=2)
 
@@ -102,11 +107,17 @@ class MotorSystemNode(Node):
 
         # Convert clipped rad/s to RPM: RPM = rad/s * (60 / 2π)
         conversion_factor = 60.0 / (2.0 * math.pi)
+        
+        
 
-        fl_rpm = fl_clipped * conversion_factor
-        fr_rpm = fr_clipped * conversion_factor
-        rl_rpm = rl_clipped * conversion_factor
-        rr_rpm = rr_clipped * conversion_factor
+        # 2. Apply the parameters in your code
+        fl_rpm = fl_clipped * conversion_factor * self.rpm_inversion_config["fl"]
+        fr_rpm = fr_clipped * conversion_factor * self.rpm_inversion_config["fr"]
+        rl_rpm = rl_clipped * conversion_factor * self.rpm_inversion_config["rl"]
+        rr_rpm = rr_clipped * conversion_factor * self.rpm_inversion_config["rr"]
+                
+        
+        
 
         self.get_logger().info(f"[RPM CONVERSION] Target RPMs -> FL: {fl_rpm:.2f}, FR: {fr_rpm:.2f}, RL: {rl_rpm:.2f}, RR: {rr_rpm:.2f}")
 

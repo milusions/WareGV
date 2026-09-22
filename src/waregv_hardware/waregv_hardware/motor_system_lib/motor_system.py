@@ -18,7 +18,7 @@ class MotorSystem:
         with open(config_file, "r") as f:
             self.config = yaml.safe_load(f)
 
-        self.ports = self.config.get("ports", ["/dev/ttyACM3"])
+        self.ports = self.config.get("ports", ["/dev/ttyAMA3"])
         self.servo_ids = self.config.get("servo_ids", [1, 2])
         self.log_filename = self.config.get("log_filename", "motor_system.log")
 
