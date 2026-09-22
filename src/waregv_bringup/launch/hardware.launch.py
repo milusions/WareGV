@@ -179,15 +179,15 @@ def generate_launch_description():
         forwarding=True,
     )
 
-    waregv_dashboard_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_dashboard"),
-        "launch",
-        "dashboard.launch.py",
-    )
-    waregv_dashboard = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_dashboard_launch_file_path),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
-    )
+    # waregv_dashboard_launch_file_path = os.path.join(
+    #     get_package_share_directory("waregv_dashboard"),
+    #     "launch",
+    #     "dashboard.launch.py",
+    # )
+    # waregv_dashboard = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(waregv_dashboard_launch_file_path),
+    #     launch_arguments={"use_sim_time": use_sim_time}.items(),
+    # )
 
     return LaunchDescription(
 [
@@ -205,6 +205,6 @@ def generate_launch_description():
             waregv_navigation,
             rosbridge_node,
             foxglove_bridge,
-            waregv_dashboard,
+            # waregv_dashboard,
         ]
     )
