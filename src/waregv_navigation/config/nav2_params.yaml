@@ -1,173 +1,73 @@
-# ==============================================================================
-# NAV2 MAIN PARAMETERS CONFIGURATION FILE
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# 1. ADAPTIVE MONTE CARLO LOCALIZATION (AMCL)
-# Note: Should be disabled/not launched when actively running SLAM Toolbox.
-# ------------------------------------------------------------------------------
 amcl:
   ros__parameters:
-    # --- Frame & Topic Definitions ---
-    base_frame_id: "base_footprint"  # Robot's root coordinate frame
-    global_frame_id: "map"             # Global coordinate frame for localization
-    odom_frame_id: "odom"             # Odometry frame for local tracking
-    scan_topic: scan                  # Topic for incoming LaserScan data
-    tf_broadcast: true                # Set to true to publish map -> odom transform
-
-    # --- Particle Filter Core Settings ---
-    min_particles: 500                # Minimum allowed particle count
-    max_particles: 2000               # Maximum allowed particle count (higher = more CPU, better recovery)
-    pf_err: 0.05                      # Target error for particle filter population scaling
-    pf_z: 0.99                        # Normal quantile for target error calculation
-    resample_interval: 1              # Number of filter updates required before resampling
-    save_pose_rate: 0.5               # Frequency (Hz) to save last known pose to parameter server
-    transform_tolerance: 1.0          # Time tolerance (sec) for published transform lookup
-
-    # --- Motion Model Noise Parameters (Odometry) ---
-    robot_model_type: "nav2_amcl::DifferentialMotionModel" # Motion model (Differential or Omnidirectional)
-    alpha1: 0.2                       # Expected rotational noise from rotational motion
-    alpha2: 0.2                       # Expected rotational noise from translational motion
-    alpha3: 0.2                       # Expected translational noise from translational motion
-    alpha4: 0.2                       # Expected translational noise from rotational motion
-    alpha5: 0.2                       # Extra noise parameter (used primarily for omnidirectional models)
-
-    # --- Laser Model & Raycasting Settings ---
-    laser_model_type: "likelihood_field" # Sensor model type: "likelihood_field" or "beam"
-    laser_min_range: -1.0             # Minimum scan range threshold (-1 uses reported minimum)
-    laser_max_range: 100.0            # Maximum scan range threshold (-1 uses reported maximum)
-    max_beams: 60                     # Maximum rays to process per scan pass (saves CPU)
-    laser_likelihood_max_dist: 2.0    # Maximum distance for likelihood field obstacle matching (meters)
-    sigma_hit: 0.2                    # Standard deviation for Gaussian distribution of obstacle hits
-
-    # Mixture Model Weights (Must sum roughly to 1.0)
-    z_hit: 0.5                        # Weight for correctly measured hits
-    z_short: 0.05                     # Weight for unexpectedly short readings (e.g., dynamic obstacles)
-    z_max: 0.05                       # Weight for max-range missed readings
-    z_rand: 0.5                       # Weight for random spurious noise readings
-    lambda_short: 0.1                 # Exponential decay parameter for short readings
-
-    # --- Beam Skip Optimization ---
-    do_beamskip: false                # Enable beam skipping to discard unmodeled obstacles
-    beam_skip_distance: 0.5           # Distance threshold to trigger beam skipping
-    beam_skip_error_threshold: 0.9    # Percentage of skipped beams needed to trigger recalculation
-    beam_skip_threshold: 0.3          # Minimum percentage of valid beams required
-
-    # --- Filter Update Triggers ---
-    update_min_d: 0.25                # Minimum linear distance (m) required before updating filter
-    update_min_a: 0.2                 # Minimum angular rotation (rad) required before updating filter
-
-    # --- Global Localization & Recovery ---
-    recovery_alpha_fast: 0.0          # Fast exponential filter decay rate for random particle injection (0.0 disables)
-    recovery_alpha_slow: 0.0          # Slow exponential filter decay rate for random particle injection (0.0 disables)
-
-
-# ------------------------------------------------------------------------------
-# 2. BEHAVIOR TREE NAVIGATOR (BT NAVIGATOR)
-# High-level coordinator that executes navigation tasks via Behavior Trees.
-# ------------------------------------------------------------------------------
-bt_navigator:
-  ros__parameters:
-    global_frame: map                 # Global reference frame
-    robot_base_frame: base_footprint       # Robot base frame
-    odom_topic:    /odom              # Odometry topic used for internal tracking
-    bt_loop_duration: 10              # Duration (ms) of each execution step of the Behavior Tree
-    default_server_timeout: 20        # Timeout (ms) when waiting for action servers to respond
-    wait_for_service_timeout: 1000    # Timeout (ms) when waiting for cra# ==============================================================================
-# NAV2 MAIN PARAMETERS CONFIGURATION FILE
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# 1. ADAPTIVE MONTE CARLO LOCALIZATION (AMCL)
-# Note: Should be disabled/not launched when actively running SLAM Toolbox.
-# ------------------------------------------------------------------------------
-amcl:
-  ros__parameters:
-    base_frame_id: "base_footprint"
-    global_frame_id: "map"
-    odom_frame_id: "odom"
-    scan_topic: scan
-    tf_broadcast: true
-
-    min_particles: 500
-    max_particles: 2000
-    pf_err: 0.05
-    pf_z: 0.99
-    resample_interval: 1
-    save_pose_rate: 0.5
-    transform_tolerance: 1.0
-
-    robot_model_type: "nav2_amcl::DifferentialMotionModel"
     alpha1: 0.2
     alpha2: 0.2
     alpha3: 0.2
     alpha4: 0.2
     alpha5: 0.2
-
-    laser_model_type: "likelihood_field"
-    laser_min_range: -1.0
-    laser_max_range: 100.0
-    max_beams: 60
-    laser_likelihood_max_dist: 2.0
-    sigma_hit: 0.2
-
-    z_hit: 0.5
-    z_short: 0.05
-    z_max: 0.05
-    z_rand: 0.5
-    lambda_short: 0.1
-
-    do_beamskip: false
+    base_frame_id: "base_footprint"
     beam_skip_distance: 0.5
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
-
-    update_min_d: 0.25
-    update_min_a: 0.2
-
+    do_beamskip: false
+    global_frame_id: "map"
+    lambda_short: 0.1
+    laser_likelihood_max_dist: 2.0
+    laser_max_range: 100.0
+    laser_min_range: -1.0
+    laser_model_type: "likelihood_field"
+    max_beams: 60
+    max_particles: 2000
+    min_particles: 500
+    odom_frame_id: "odom"
+    pf_err: 0.05
+    pf_z: 0.99
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
+    resample_interval: 1
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    save_pose_rate: 0.5
+    sigma_hit: 0.2
+    tf_broadcast: true
+    transform_tolerance: 1.0
+    update_min_a: 0.2
+    update_min_d: 0.25
+    z_hit: 0.5
+    z_max: 0.05
+    z_rand: 0.5
+    z_short: 0.05
+    scan_topic: scan
 
-# ------------------------------------------------------------------------------
-# 2. BEHAVIOR TREE NAVIGATOR (BT NAVIGATOR)
-# ------------------------------------------------------------------------------
 bt_navigator:
   ros__parameters:
     global_frame: map
-    robot_base_frame: base_footprint
+    robot_base_frame: base_link
     odom_topic: /odom
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
-
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
     navigate_through_poses:
       plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
-
     error_code_names:
       - compute_path_error_code
       - follow_path_error_code
 
-# ------------------------------------------------------------------------------
-# 3. CONTROLLER SERVER (LOCAL PLANNER)
-# ------------------------------------------------------------------------------
 controller_server:
   ros__parameters:
     controller_frequency: 20.0
     costmap_update_timeout: 0.30
-    failure_tolerance: 0.3
-    use_realtime_priority: false
-
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
-
+    failure_tolerance: 0.3
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
+    use_realtime_priority: false
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -180,65 +80,59 @@ controller_server:
       xy_goal_tolerance: 0.25
       yaw_goal_tolerance: 0.25
 
+      
+
     FollowPath:
       plugin: "nav2_rotation_shim_controller::RotationShimController"
-      primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-
+      closed_loop: false
       angular_dist_threshold: 0.785
       forward_sampling_distance: 0.5
       rotate_to_heading_angular_vel: 1.57
       max_angular_accel: 5.0
       simulate_ahead_time: 1.0
-
+      primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       desired_linear_vel: 1.0
       lookahead_dist: 0.4
       min_lookahead_dist: 0.25
       max_lookahead_dist: 0.6
       lookahead_time: 1.2
+      transform_tolerance: 0.1
       use_velocity_scaled_lookahead_dist: false
-      
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.6
-
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 0.5
-      regulated_linear_scaling_min_speed: 0.45
-
+      use_fixed_curvature_lookahead: false
+      curvature_lookahead_dist: 0.25
       use_cost_regulated_linear_velocity_scaling: false
       cost_scaling_dist: 0.3
       cost_scaling_gain: 1.0
       inflation_cost_scaling_factor: 3.0
-
-      closed_loop: false
-      transform_tolerance: 0.1
-      use_fixed_curvature_lookahead: false
-      curvature_lookahead_dist: 0.25
+      regulated_linear_scaling_min_radius: 0.5
+      regulated_linear_scaling_min_speed: 0.45
       use_rotate_to_heading: false
       allow_reversing: false
       max_robot_pose_search_dist: 10.0
       use_interpolation: true
 
-# ------------------------------------------------------------------------------
-# 4. LOCAL COSTMAP
-# ------------------------------------------------------------------------------
 local_costmap:
   local_costmap:
     ros__parameters:
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
-      robot_base_frame: base_footprint
+      robot_base_frame: base_link
       rolling_window: true
       width: 3
       height: 3
       resolution: 0.05
       robot_radius: 0.22
-      always_send_full_costmap: True
-
       plugins: ["voxel_layer", "inflation_layer"]
-
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.20
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -248,7 +142,6 @@ local_costmap:
         z_voxels: 16
         max_obstacle_height: 2.0
         mark_threshold: 0
-        
         observation_sources: scan
         scan:
           topic: /scan
@@ -260,37 +153,22 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
-
-      inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.35        # FIXED: Increased to safely clear the 0.22m robot radius
-
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
+      always_send_full_costmap: True
 
-# ------------------------------------------------------------------------------
-# 5. GLOBAL COSTMAP
-# ------------------------------------------------------------------------------
 global_costmap:
   global_costmap:
     ros__parameters:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: base_footprint
+      robot_base_frame: base_link
       robot_radius: 0.22
       resolution: 0.05
       track_unknown_space: true
-      always_send_full_costmap: True
-
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
-
-      static_layer:
-        plugin: "nav2_costmap_2d::StaticLayer"
-        map_subscribe_transient_local: True
-
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -305,30 +183,33 @@ global_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
-
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.35        # FIXED: Increased to safely clear the 0.22m robot radius
+        inflation_radius: 0.2
+      always_send_full_costmap: True
 
-# ------------------------------------------------------------------------------
-# 6. GLOBAL PLANNER SERVER
-# ------------------------------------------------------------------------------
+map_saver:
+  ros__parameters:
+    save_map_timeout: 5.0
+    free_thresh_default: 0.25
+    occupied_thresh_default: 0.65
+    map_subscribe_transient_local: True
+
 planner_server:
   ros__parameters:
     expected_planner_frequency: 20.0
-    costmap_update_timeout: 1.0
     planner_plugins: ["GridBased"]
-
+    costmap_update_timeout: 1.0
     GridBased:
       plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.5
       use_astar: false
       allow_unknown: true
 
-# ------------------------------------------------------------------------------
-# 7. PATH SMOOTHER SERVER
-# ------------------------------------------------------------------------------
 smoother_server:
   ros__parameters:
     smoother_plugins: ["simple_smoother"]
@@ -338,27 +219,13 @@ smoother_server:
       max_its: 1000
       do_refinement: True
 
-# ------------------------------------------------------------------------------
-# 8. BEHAVIOR SERVER
-# ------------------------------------------------------------------------------
 behavior_server:
   ros__parameters:
     local_costmap_topic: local_costmap/costmap_raw
     global_costmap_topic: global_costmap/costmap_raw
     local_footprint_topic: local_costmap/published_footprint
     global_footprint_topic: global_costmap/published_footprint
-
     cycle_frequency: 10.0
-    local_frame: odom
-    global_frame: map
-    robot_base_frame: base_footprint
-    transform_tolerance: 0.1
-    simulate_ahead_time: 2.0
-
-    max_rotational_vel: 1.57
-    min_rotational_vel: 0.4
-    rotational_acc_lim: 5.0
-
     behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
     spin:
       plugin: "nav2_behaviors::Spin"
@@ -370,31 +237,31 @@ behavior_server:
       plugin: "nav2_behaviors::Wait"
     assisted_teleop:
       plugin: "nav2_behaviors::AssistedTeleop"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.1
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.57
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 5.0
 
-# ------------------------------------------------------------------------------
-# 9. WAYPOINT FOLLOWER
-# ------------------------------------------------------------------------------
 waypoint_follower:
   ros__parameters:
     loop_rate: 20
     stop_on_failure: false
     action_server_result_timeout: 900.0
     waypoint_task_executor_plugin: "wait_at_waypoint"
-
     wait_at_waypoint:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: True
       waypoint_pause_duration: 200
 
-# ------------------------------------------------------------------------------
-# 10. ROUTE SERVER
-# ------------------------------------------------------------------------------
 route_server:
   ros__parameters:
     boundary_radius_to_achieve_node: 1.0
     radius_to_achieve_node: 2.0
     smooth_corners: true
-
     operations: ["AdjustSpeedLimit", "ReroutingService", "CollisionMonitor"]
     ReroutingService:
       plugin: "nav2_route::ReroutingService"
@@ -403,35 +270,27 @@ route_server:
     CollisionMonitor:
       plugin: "nav2_route::CollisionMonitor"
       max_collision_dist: 3.0
-
     edge_cost_functions: ["DistanceScorer", "CostmapScorer"]
     DistanceScorer:
       plugin: "nav2_route::DistanceScorer"
     CostmapScorer:
       plugin: "nav2_route::CostmapScorer"
 
-# ------------------------------------------------------------------------------
-# 11. VELOCITY SMOOTHER
-# ------------------------------------------------------------------------------
 velocity_smoother:
   ros__parameters:
     smoothing_frequency: 20.0
     stamp_smoothed_velocity_with_smoothing_time: False
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    odom_topic: "odom"
-    odom_duration: 0.1
-    velocity_timeout: 1.0
-
     max_velocity: [0.1, 0.0, 1.57]
     min_velocity: [-0.1, 0.0, -1.57]
     max_accel: [0.1, 0.0, 4.0]
     max_decel: [-0.1, 0.0, -4.0]
+    odom_topic: "odom"
+    odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
 
-# ------------------------------------------------------------------------------
-# 12. COLLISION MONITOR
-# ------------------------------------------------------------------------------
 collision_monitor:
   ros__parameters:
     base_frame_id: "base_footprint"
@@ -443,7 +302,6 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-
     polygons: ["FootprintApproach"]
     FootprintApproach:
       type: "polygon"
@@ -452,10 +310,8 @@ collision_monitor:
       time_before_collision: 0.5
       simulation_time_step: 0.1
       min_points: 6
-      max_points: 100               # FIXED: Added missing parameter to prevent node crash
       visualize: False
       enabled: True
-
     observation_sources: ["scan"]
     scan:
       type: "scan"
@@ -464,9 +320,6 @@ collision_monitor:
       max_height: 2.0
       enabled: True
 
-# ------------------------------------------------------------------------------
-# 13. DOCKING SERVER
-# ------------------------------------------------------------------------------
 docking_server:
   ros__parameters:
     controller_frequency: 50.0
@@ -476,7 +329,7 @@ docking_server:
     undock_linear_tolerance: 0.05
     undock_angular_tolerance: 0.1
     max_retries: 3
-    base_frame: "base_footprint"
+    base_frame: "base_link"
     fixed_frame: "odom"
     dock_backwards: false
     dock_prestaging_tolerance: 0.5
@@ -511,9 +364,6 @@ docking_server:
       simulation_step: 0.1
       dock_collision_threshold: 0.3
 
-# ------------------------------------------------------------------------------
-# 14. LOOPBACK SIMULATOR
-# ------------------------------------------------------------------------------
 loopback_simulator:
   ros__parameters:
     base_frame_id: "base_footprint"
@@ -526,453 +376,4 @@ loopback_simulator:
     scan_angle_min: -3.1415
     scan_angle_max: 3.1415
     scan_angle_increment: 0.02617
-    scan_use_inf: trueitical services
-    action_server_result_timeout: 900.0 # Timeout (sec) to retain completed action results
-
-    # Action navigators enabled for execution
-    navigators: ["navigate_to_pose", "navigate_through_poses"]
-    navigate_to_pose:
-      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
-    navigate_through_poses:
-      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
-
-    # Action result error codes tracked for diagnostic handling
-    error_code_names:
-      - compute_path_error_code
-      - follow_path_error_code
-
-
-# ------------------------------------------------------------------------------
-# 3. CONTROLLER SERVER (LOCAL PLANNER)
-# Translates global paths into velocity commands (cmd_vel) while avoiding obstacles.
-# ------------------------------------------------------------------------------
-controller_server:
-  ros__parameters:
-    controller_frequency: 20.0        # Control loop execution rate (Hz)
-    costmap_update_timeout: 0.30      # Max delay (sec) allowed before costmap update is considered stale
-    failure_tolerance: 0.3            # Time tolerance (sec) allowed for controller execution failures
-    use_realtime_priority: false      # Set true to request real-time execution priority (Linux only)
-
-    # Minimum velocity thresholds (below these values, velocities are zeroed)
-    min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
-    min_theta_velocity_threshold: 0.001
-
-    # Active Plugins
-    progress_checker_plugins: ["progress_checker"]
-    goal_checker_plugins: ["general_goal_checker"]
-    controller_plugins: ["FollowPath"]
-
-    # --- Progress Checker Plugin ---
-    progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.5   # Minimum distance (m) robot must cover to verify progress
-      movement_time_allowance: 10.0   # Time (sec) allowed to cover required_movement_radius before failing
-
-    # --- Goal Checker Plugin ---
-    general_goal_checker:
-      stateful: True
-      plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25         # Positional tolerance (m) to satisfy goal reach
-      yaw_goal_tolerance: 0.25        # Orientation tolerance (rad) to satisfy goal reach
-
-    # --- Primary Controller: Rotation Shim Wrapper around Regulated Pure Pursuit ---
-    FollowPath:
-      plugin: "nav2_rotation_shim_controller::RotationShimController"
-      primary_controller: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-
-      # --- Rotation Shim Parameters ---
-      angular_dist_threshold: 0.785    # Angular error threshold (rad) to trigger initial in-place rotation
-      forward_sampling_distance: 0.5   # Sampling distance (m) to calculate path target heading
-      rotate_to_heading_angular_vel: 1.57 # Speed (rad/s) used during in-place heading alignment
-      max_angular_accel: 5.0           # Maximum rotational acceleration (rad/s^2)
-      simulate_ahead_time: 1.0         # Lookahead time (sec) for collision checking during in-place rotation
-
-      # --- Inner Regulated Pure Pursuit Parameters ---
-      desired_linear_vel: 1.0         # Target forward cruising speed (m/s)
-      lookahead_dist: 0.4             # Primary lookahead distance (m) to target path pose
-      min_lookahead_dist: 0.25        # Minimum lookahead distance (m) when scaling down speed
-      max_lookahead_dist: 0.6         # Maximum lookahead distance (m) when scaling up speed
-      lookahead_time: 1.2             # Lookahead time factor for dynamic calculation
-      use_velocity_scaled_lookahead_dist: false # Enable dynamic lookahead distance based on speed
-      
-      # Approach Velocity Scaling
-      min_approach_linear_velocity: 0.05 # Minimum speed (m/s) during final goal approach
-      approach_velocity_scaling_dist: 0.6 # Distance (m) from goal to begin deceleration
-
-      # Dynamic Speed Scaling & Collision Safety
-      use_collision_detection: true   # Enable path-ahead collision detection
-      max_allowed_time_to_collision_up_to_carrot: 1.0 # Time horizon (sec) to evaluate potential collision
-      use_regulated_linear_velocity_scaling: true # Slow down automatically on sharp turns
-      regulated_linear_scaling_min_radius: 0.5  # Turning radius threshold (m) below which speed scales down
-      regulated_linear_scaling_min_speed: 0.45   # Floor speed limit (m/s) during regulated scaling
-
-      # Cost-based Scaling (Disabled)
-      use_cost_regulated_linear_velocity_scaling: false # Slow down near high-cost costmap areas
-      cost_scaling_dist: 0.3
-      cost_scaling_gain: 1.0
-      inflation_cost_scaling_factor: 3.0
-
-      # Path Tracking Extras
-      closed_loop: false              # Calculate lookahead target relative to actual pose vs path point
-      transform_tolerance: 0.1        # Transform lookup tolerance (sec)
-      use_fixed_curvature_lookahead: false
-      curvature_lookahead_dist: 0.25
-      use_rotate_to_heading: false    # Handled externally by the outer RotationShim
-      allow_reversing: false          # Allow backward motion tracking
-      max_robot_pose_search_dist: 10.0 # Search distance (m) on path to match robot's position
-      use_interpolation: true         # Interpolate lookahead positions between path waypoints
-
-
-# ------------------------------------------------------------------------------
-# 4. LOCAL COSTMAP
-# Short-range, high-rate dynamic grid used for real-time obstacle avoidance.
-# ------------------------------------------------------------------------------
-local_costmap:
-  local_costmap:
-    ros__parameters:
-      update_frequency: 5.0           # Costmap recalculation frequency (Hz)
-      publish_frequency: 2.0          # Costmap ROS 2 topic publish frequency (Hz)
-      global_frame: odom              # Local costmap operates relative to odometry frame
-      robot_base_frame: base_footprint      # Robot baseline transform frame
-      rolling_window: true            # Keep grid centered dynamically on the robot
-      width: 3                        # Grid width (meters)
-      height: 3                       # Grid height (meters)
-      resolution: 0.05                # Grid cell size (meters per cell)
-      robot_radius: 0.22              # Circular footprint approximation radius (meters)
-      always_send_full_costmap: True # Publish entire costmap instead of differential updates
-
-      # Dynamic Layer Stack
-      plugins: ["voxel_layer", "inflation_layer"]
-
-      # --- 3D Voxel Perception Layer ---
-      voxel_layer:
-        plugin: "nav2_costmap_2d::VoxelLayer"
-        enabled: True
-        publish_voxel_map: True       # Publish internal 3D voxel grid visualization
-        origin_z: 0.0                 # Z origin of voxel grid (meters)
-        z_resolution: 0.05            # Vertical voxel resolution (meters)
-        z_voxels: 16                  # Number of vertical voxel slices (16 * 0.05 = 0.8m total height)
-        max_obstacle_height: 2.0      # Maximum height (m) to integrate obstacles
-        mark_threshold: 0             # Minimum voxel count needed to mark column as occupied
-        
-        observation_sources: scan
-        scan:
-          topic: /scan                # Incoming LiDAR scan topic
-          max_obstacle_height: 2.0    # Ignore laser returns above this height
-          clearing: True              # Use raytracing to clear obsolete obstacles
-          marking: True               # Use laser points to mark obstacles
-          data_type: "LaserScan"       # Input data format
-          raytrace_max_range: 3.0     # Maximum distance (m) to clear obstacles
-          raytrace_min_range: 0.0     # Minimum distance (m) to clear obstacles
-          obstacle_max_range: 2.5     # Maximum distance (m) to insert obstacles
-          obstacle_min_range: 0.0     # Minimum distance (m) to insert obstacles
-
-      # --- Inflation Layer ---
-      inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0      # Decay rate of cost away from obstacles (higher = steeper drop)
-        inflation_radius: 0.20        # Safety buffer zone around obstacles (meters)
-
-      # --- Static Layer Configuration (Unused in local costmap plugins stack) ---
-      static_layer:
-        plugin: "nav2_costmap_2d::StaticLayer"
-        map_subscribe_transient_local: True
-
-
-# ------------------------------------------------------------------------------
-# 5. GLOBAL COSTMAP
-# Environmental representation used for full-map route and path planning.
-# ------------------------------------------------------------------------------
-global_costmap:
-  global_costmap:
-    ros__parameters:
-      update_frequency: 1.0           # Global costmap calculation rate (Hz)
-      publish_frequency: 1.0          # Global costmap topic publication rate (Hz)
-      global_frame: map               # Operates in global map frame
-      robot_base_frame: base_footprint
-      robot_radius: 0.22              # Circular footprint approximation radius (meters)
-      resolution: 0.05                # Grid cell size matching overall map resolution
-      track_unknown_space: true       # Treat unmapped cells as unknown space instead of free space
-      always_send_full_costmap: True
-
-      # Layer Stack
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
-
-      # --- Static Map Layer ---
-      static_layer:
-        plugin: "nav2_costmap_2d::StaticLayer"
-        map_subscribe_transient_local: True # Match QoS profile for persistent map topics
-
-      # --- 2D Obstacle Layer ---
-      obstacle_layer:
-        plugin: "nav2_costmap_2d::ObstacleLayer"
-        enabled: True
-        observation_sources: scan
-        scan:
-          topic: /scan
-          max_obstacle_height: 2.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 3.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 2.5
-          obstacle_min_range: 0.0
-
-      # --- Inflation Layer ---
-      inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.2         # Padding radius added around static and dynamic obstacles
-
-
-# ------------------------------------------------------------------------------
-# 6. GLOBAL PLANNER SERVER
-# Generates global path routes from robot position to goal target.
-# ------------------------------------------------------------------------------
-planner_server:
-  ros__parameters:
-    expected_planner_frequency: 20.0  # Expected calculation rate (Hz)
-    costmap_update_timeout: 1.0       # Timeout waiting for updated global costmap
-    planner_plugins: ["GridBased"]
-
-    # --- NavFn Planner Plugin ---
-    GridBased:
-      plugin: "nav2_navfn_planner::NavfnPlanner"
-      tolerance: 0.5                  # Tolerance radius (m) around requested goal if blocked
-      use_astar: false                # Use Dijkstra's algorithm (false) or A* (true)
-      allow_unknown: true             # Allow global paths to traverse through unmapped space
-
-
-# ------------------------------------------------------------------------------
-# 7. PATH SMOOTHER SERVER
-# Post-processes raw topological paths into continuous, smoothed trajectories.
-# ------------------------------------------------------------------------------
-smoother_server:
-  ros__parameters:
-    smoother_plugins: ["simple_smoother"]
-
-    simple_smoother:
-      plugin: "nav2_smoother::SimpleSmoother"
-      tolerance: 1.0e-10              # Optimization convergence tolerance
-      max_its: 1000                   # Maximum relaxation iterations
-      do_refinement: True             # Perform additional smoothing iteration pass
-
-
-# ------------------------------------------------------------------------------
-# 8. BEHAVIOR SERVER
-# Executes recovery behaviors (e.g., spin, backup) when navigation stalls.
-# ------------------------------------------------------------------------------
-behavior_server:
-  ros__parameters:
-    # Related Topic Inputs
-    local_costmap_topic: local_costmap/costmap_raw
-    global_costmap_topic: global_costmap/costmap_raw
-    local_footprint_topic: local_costmap/published_footprint
-    global_footprint_topic: global_costmap/published_footprint
-
-    # Execution Frames & Tolerances
-    cycle_frequency: 10.0             # Loop execution rate (Hz)
-    local_frame: odom
-    global_frame: map
-    robot_base_frame: base_footprint
-    transform_tolerance: 0.1
-    simulate_ahead_time: 2.0          # Collision checking horizon during recovery steps
-
-    # Recovery Rotational Dynamics
-    max_rotational_vel: 1.57          # Max rotation speed (rad/s)
-    min_rotational_vel: 0.4           # Min rotation speed (rad/s)
-    rotational_acc_lim: 5.0           # Angular acceleration limit (rad/s^2)
-
-    # Active Recovery Plugins
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
-    spin:
-      plugin: "nav2_behaviors::Spin"
-    backup:
-      plugin: "nav2_behaviors::BackUp"
-    drive_on_heading:
-      plugin: "nav2_behaviors::DriveOnHeading"
-    wait:
-      plugin: "nav2_behaviors::Wait"
-    assisted_teleop:
-      plugin: "nav2_behaviors::AssistedTeleop"
-
-
-# ------------------------------------------------------------------------------
-# 9. WAYPOINT FOLLOWER
-# Sequentially executes navigation across an array of multi-goal waypoints.
-# ------------------------------------------------------------------------------
-waypoint_follower:
-  ros__parameters:
-    loop_rate: 20                     # Waypoint execution monitor rate (Hz)
-    stop_on_failure: false            # Abort full route execution if a single waypoint fails
-    action_server_result_timeout: 900.0
-    waypoint_task_executor_plugin: "wait_at_waypoint"
-
-    wait_at_waypoint:
-      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
-      enabled: True
-      waypoint_pause_duration: 200    # Pause time at each waypoint (ms)
-
-
-# ------------------------------------------------------------------------------
-# 10. ROUTE SERVER
-# Top-level graph and network routing plugin engine.
-# ------------------------------------------------------------------------------
-route_server:
-  ros__parameters:
-    boundary_radius_to_achieve_node: 1.0 # Inner radius (m) to confirm graph node arrival
-    radius_to_achieve_node: 2.0       # Outer radius threshold (m) for node proximity
-    smooth_corners: true              # Apply curve blending on sharp graph edges
-
-    # Active operations, services, and monitors
-    operations: ["AdjustSpeedLimit", "ReroutingService", "CollisionMonitor"]
-    ReroutingService:
-      plugin: "nav2_route::ReroutingService"
-    AdjustSpeedLimit:
-      plugin: "nav2_route::AdjustSpeedLimit"
-    CollisionMonitor:
-      plugin: "nav2_route::CollisionMonitor"
-      max_collision_dist: 3.0         # Safety scan distance along active route
-
-    # Edge scoring criteria
-    edge_cost_functions: ["DistanceScorer", "CostmapScorer"]
-    DistanceScorer:
-      plugin: "nav2_route::DistanceScorer"
-    CostmapScorer:
-      plugin: "nav2_route::CostmapScorer"
-
-
-# ------------------------------------------------------------------------------
-# 11. VELOCITY SMOOTHER
-# Limits acceleration/deceleration to smooth cmd_vel outputs sent to hardware.
-# ------------------------------------------------------------------------------
-velocity_smoother:
-  ros__parameters:
-    smoothing_frequency: 20.0         # Output publishing frequency (Hz)
-    stamp_smoothed_velocity_with_smoothing_time: False
-    scale_velocities: False           # Scale linear/angular down proportionally when hitting limits
-    feedback: "OPEN_LOOP"             # "OPEN_LOOP" uses commands; "CLOSED_LOOP" uses odometry feedback
-    odom_topic: "odom"
-    odom_duration: 0.1                # Odometry buffer lookback period (sec)
-    velocity_timeout: 1.0             # Command timeout before stopping (sec)
-
-    # Velocity and Acceleration Envelope Limits: [X, Y, Theta]
-    max_velocity: [0.1, 0.0, 1.57]    # Max forward, strafe, and rotation velocities
-    min_velocity: [-0.1, 0.0, -1.57]   # Max reverse, strafe, and inverse rotation velocities
-    max_accel: [0.1, 0.0, 4.0]        # Max acceleration limits
-    max_decel: [-0.1, 0.0, -4.0]      # Max deceleration limits
-    deadband_velocity: [0.0, 0.0, 0.0]# Minimum threshold required to send commands
-
-
-# ------------------------------------------------------------------------------
-# 12. COLLISION MONITOR
-# Low-latency node reading direct sensor streams to override commands on imminent hit.
-# ------------------------------------------------------------------------------
-collision_monitor:
-  ros__parameters:
-    base_frame_id: "base_footprint"
-    odom_frame_id: "odom"
-    cmd_vel_in_topic: "cmd_vel_smoothed" # Unfiltered output from velocity smoother
-    cmd_vel_out_topic: "cmd_vel"          # Safe, safety-checked output to motor drive
-    state_topic: "collision_monitor_state"
-    transform_tolerance: 0.2
-    source_timeout: 1.0               # Data source freshness timeout (sec)
-    base_shift_correction: True
-    stop_pub_timeout: 2.0             # Timeout after stopping before ceasing publish (sec)
-
-    # Active Polygon Subspaces
-    polygons: ["FootprintApproach"]
-    FootprintApproach:
-      type: "polygon"
-      action_type: "approach"         # Dynamically slow down based on time-to-collision
-      footprint_topic: "/local_costmap/published_footprint"
-      time_before_collision: 0.5      # Trigger safety action if collision expected within (sec)
-      simulation_time_step: 0.1       # Kinematic trajectory projection step (sec)
-      min_points: 6                   # Minimum sensor readings to trigger intervention
-      visualize: False
-      enabled: True
-
-    # Active Observation Data Feeds
-    observation_sources: ["scan"]
-    scan:
-      type: "scan"
-      topic: "scan"
-      min_height: 0.15                # Vertical range filters (meters)
-      max_height: 2.0
-      enabled: True
-
-
-# ------------------------------------------------------------------------------
-# 13. DOCKING SERVER
-# Autonomous docking and precision charging station alignment.
-# ------------------------------------------------------------------------------
-docking_server:
-  ros__parameters:
-    controller_frequency: 50.0        # Precision alignment loop frequency (Hz)
-    initial_perception_timeout: 5.0   # Timeout searching for visual/laser docking marker
-    wait_charge_timeout: 5.0          # Timeout waiting for electrical connection state
-    dock_approach_timeout: 30.0       # Total allowed docking execution time
-    undock_linear_tolerance: 0.05     # Distance tolerance for un-docking maneuver completion
-    undock_angular_tolerance: 0.1      # Angle tolerance for un-docking maneuver completion
-    max_retries: 3                    # Docking attempt retries on failure
-    base_frame: "base_footprint"
-    fixed_frame: "odom"
-    dock_backwards: false             # Set true if charging contacts are on the rear
-    dock_prestaging_tolerance: 0.5    # Approach staging area tolerance
-
-    # Charging Dock Plugins
-    dock_plugins: ['simple_charging_dock']
-    simple_charging_dock:
-      plugin: 'opennav_docking::SimpleChargingDock'
-      docking_threshold: 0.05         # Distance threshold to consider docked
-      staging_x_offset: -0.7          # Staging start pose offset relative to target dock
-      use_external_detection_pose: true # Rely on external perception vision node for dock pose
-      use_battery_status: false       # Monitor battery state topic for dock confirmation
-      use_stall_detection: false     # Monitor motor stall current for contact confirmation
-
-      # External Detection Pose Transforms & Offsets
-      external_detection_timeout: 1.0
-      external_detection_translation_x: -0.18
-      external_detection_translation_y: 0.0
-      external_detection_rotation_roll: -1.57
-      external_detection_rotation_pitch: -1.57
-      external_detection_rotation_yaw: 0.0
-      filter_coef: 0.1                # Low-pass noise filter coefficient for target estimation
-
-    # Pure Pursuit Controller used during Docking Steps
-    controller:
-      k_phi: 3.0                      # Heading error gain
-      k_delta: 2.0                    # Cross-track error gain
-      v_linear_min: 0.15              # Minimum docking speed (m/s)
-      v_linear_max: 0.15              # Maximum docking speed (m/s)
-      use_collision_detection: true   # Keep costmap collision checking active during docking
-      costmap_topic: "local_costmap/costmap_raw"
-      footprint_topic: "local_costmap/published_footprint"
-      transform_tolerance: 0.1
-      projection_time: 5.0            # Trajectory projection lookahead (sec)
-      simulation_step: 0.1
-      dock_collision_threshold: 0.3
-
-
-# ------------------------------------------------------------------------------
-# 14. LOOPBACK SIMULATOR
-# Lightweight internal simulator used for testing without Gazebo/Physics engines.
-# ------------------------------------------------------------------------------
-loopback_simulator:
-  ros__parameters:
-    # Frame Identifiers
-    base_frame_id: "base_footprint"
-    odom_frame_id: "odom"
-    map_frame_id: "map"
-    scan_frame_id: "base_scan"
-
-    # Simulated LiDAR Settings
-    update_duration: 0.02             # Loop step period (sec, 50 Hz)
-    scan_range_min: 0.05              # Simulated min laser range (m)
-    scan_range_max: 30.0              # Simulated max laser range (m)
-    scan_angle_min: -3.1415           # Min FOV angle (rad)
-    scan_angle_max: 3.1415            # Max FOV angle (rad)
-    scan_angle_increment: 0.02617     # Angular step size (rad)
-    scan_use_inf: true                # Fill out-of-range returns with infinity (inf)
+    scan_use_inf: true

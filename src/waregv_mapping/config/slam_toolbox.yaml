@@ -1,115 +1,79 @@
-# ==============================================================================
-# SLAM TOOLBOX CONFIGURATION FILE
-# ==============================================================================
-
 slam_toolbox:
   ros__parameters:
 
-    # --------------------------------------------------------------------------
-    # 1. OPTIMIZER SOLVER PLUGINS (Ceres Solver Engine)
-    # Configures the non-linear graph optimization backend.
-    # --------------------------------------------------------------------------
-    solver_plugin: solver_plugins::CeresSolver # Non-linear optimization solver backend
-    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY# Solver method for linear equations (efficient for sparse graphs)
-    ceres_preconditioner: SCHUR_JACOBI         # Preconditioner to accelerate linear solver convergence
-    ceres_trust_strategy: LEVENBERG_MARQUARDT  # Non-linear optimization algorithm (LM step management)
-    ceres_dogleg_type: TRADITIONAL_DOGLEG       # Dogleg step strategy type (if Dogleg trust region is used)
-    ceres_loss_function: None                  # Robust loss function to downweight outliers (e.g., Huber, Cauchy, or None)
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
 
-    # --------------------------------------------------------------------------
-    # 2. ROS & FRAME DEFINITIONS
-    # Maps coordinate frames, execution modes, and topic interfaces.
-    # --------------------------------------------------------------------------
-    odom_frame: odom                           # Odometry frame ID
-    map_frame: map                             # Global map frame ID
-    base_frame: base_footprint                 # Robot base root frame ID
-    scan_topic: /scan                          # Incoming LaserScan topic
-    use_map_saver: true                        # Enable automatic map saving service interface
-    
-    # Path where the map will be continuously written (.pgm, .yaml, and .posegraph)
-    # Ensure the target directory exists and the ROS user has write permissions!
-    map_file_name: "/home/ubuntu/waregv/waregv_ws/src/waregv_mapping/maps/autosaved_map"
+    # ROS Parameters
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    use_map_saver: true
+    mode: mapping
 
-    # Interval in seconds to automatically write updated map files to disk
-    map_save_interval: 10.0   # Saves the map to disk every 10 seconds
-    mode: mapping                              # Operating mode: "mapping" (online continuous) or "localization"
+    # if you'd like to immediately start continuing a map at a given pose
+    # or at the dock, but they are mutually exclusive, if pose is given
+    # will use pose
+    #map_file_name: test_steve
+    # map_start_pose: [0.0, 0.0, 0.0]
+    #map_start_at_dock: true
 
-    # --- Pose Serialization & Continued Mapping (Optional) ---
-    # map_file_name: test_steve                # Path/name of map to load for continuing SLAM session
-    # map_start_pose: [0.0, 0.0, 0.0]          # Starting pose offset [X, Y, Yaw] when continuing map
-    # map_start_at_dock: true                  # Start mapping process relative to dock position
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02 #if 0 never publishes odometry
+    map_update_interval: 5.0
+    resolution: 0.05
+    restamp_tf: false
+    min_laser_range: 0.12 #for rastering images
+    max_laser_range: 12.0 #for rastering images
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000 #// program needs a larger stack size to serialize large maps
+    enable_interactive_mode: true
 
-    # --------------------------------------------------------------------------
-    # 3. SYSTEM, MAP & TIMING PARAMETERS
-    # Controls map resolution, update rates, and transform broadcast behaviors.
-    # --------------------------------------------------------------------------
-    debug_logging: false                       # Enable detailed console debug logs
-    throttle_scans: 1                          # Process every Nth scan (1 = process all incoming scans)
-    transform_publish_period: 0.02             # Publish rate for map -> odom transform in seconds (0.02s = 50Hz)
-    map_update_interval: 5.0                   # Frequency in seconds to publish updated dynamic occupancy map
-    resolution: 0.05                           # Occupancy grid cell resolution in meters (0.05m = 5cm/cell)
-    restamp_tf: false                          # Overwrite outgoing transform timestamps with current ROS time
-    min_laser_range: 0.12                      # Minimum sensor range in meters considered for rastering/mapping
-    max_laser_range: 12.0                      # Maximum sensor range in meters considered for rastering/mapping
-    minimum_time_interval: 0.5                 # Minimum time buffer (sec) required between processing scans
-    transform_timeout: 0.2                     # Time threshold (sec) to wait for TF lookup before dropping scan
-    tf_buffer_duration: 30.0                   # Duration (sec) to store transform cache in TF buffer
-    stack_size_to_use: 40000000                # Thread stack size allocation in bytes (needed for saving large maps)
-    enable_interactive_mode: true              # Enable interactive map node/edge editing markers in RViz
+    # General Parameters
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.5
+    minimum_travel_heading: 0.5
+    check_min_dist_and_heading_precisely: false
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1  
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true 
+    loop_match_minimum_chain_size: 10           
+    loop_match_maximum_variance_coarse: 3.0  
+    loop_match_minimum_response_coarse: 0.35    
+    loop_match_minimum_response_fine: 0.45
 
-    # --------------------------------------------------------------------------
-    # 4. GENERAL SCAN MATCHING & GRAPH BUILDER
-    # Governs keyframe insertion thresholds and scan matching graph updates.
-    # --------------------------------------------------------------------------
-    use_scan_matching: true                    # Enable scan matching to refine odometry updates
-    use_scan_barycenter: true                  # Compute scan registration relative to the laser points' center of mass
-    minimum_travel_distance: 0.5               # Linear distance (m) robot must move before processing a new scan keyframe
-    minimum_travel_heading: 0.5                # Angular rotation (rad) robot must turn before processing a new scan keyframe
-    check_min_dist_and_heading_precisely: true    # Evaluate both distance AND heading simultaneously before adding keyframe
-    scan_buffer_size: 10                       # Number of recent scans kept in working buffer for local matching
-    scan_buffer_maximum_scan_distance: 10.0    # Maximum search radius (m) for scans stored in working buffer
-    link_match_minimum_response_fine: 0.1      # Minimum scan match threshold quality to add a consecutive graph link
-    link_scan_maximum_distance: 1.5            # Maximum physical distance (m) between linked scan nodes in graph
+    # Correlation Parameters - Correlation Parameters
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1 
 
-    # --------------------------------------------------------------------------
-    # 5. LOOP CLOSING PARAMETERS
-    # Controls how historical scan submaps are matched to eliminate drift.
-    # --------------------------------------------------------------------------
-    do_loop_closing: true                      # Enable automatic loop closure optimization
-    loop_search_maximum_distance: 3.0          # Maximum distance (m) around current pose to evaluate loop candidates
-    loop_match_minimum_chain_size: 10          # Minimum sequential scan node chain required to validate a loop closure
-    loop_match_maximum_variance_coarse: 3.0    # Maximum allowable variance threshold during coarse loop search
-    loop_match_minimum_response_coarse: 0.35   # Minimum matching score needed during initial coarse loop search
-    loop_match_minimum_response_fine: 0.45     # Minimum matching score needed to confirm loop closure during fine search
+    # Correlation Parameters - Loop Closure Parameters
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
 
-    # --------------------------------------------------------------------------
-    # 6. CORRELATION SEARCH SPACE (REAL-TIME LOCAL MATCHING)
-    # Search space grid limits used during real-time scan registration against local map.
-    # --------------------------------------------------------------------------
-    correlation_search_space_dimension: 0.5    # Search window grid size (m) for local scan matching
-    correlation_search_space_resolution: 0.01 # Search window step resolution (m) for local scan matching
-    correlation_search_space_smear_deviation: 0.1 # Smearing deviation (m) applied to grid cells to soften peak responses
+    # Scan Matcher Parameters
+    distance_variance_penalty: 0.5      
+    angle_variance_penalty: 1.0    
 
-    # --------------------------------------------------------------------------
-    # 7. CORRELATION SEARCH SPACE (LOOP CLOSURE MATCHING)
-    # Search space grid limits used when searching for global loop closure candidates.
-    # --------------------------------------------------------------------------
-    loop_search_space_dimension: 8.0           # Global search window size (m) when evaluating loop closures
-    loop_search_space_resolution: 0.05         # Search resolution step (m) for global loop closure lookup
-    loop_search_space_smear_deviation: 0.03    # Smearing deviation (m) applied to grid points during loop evaluation
-
-    # --------------------------------------------------------------------------
-    # 8. SCAN MATCHER COST & PENALTY FUNCTION
-    # Weights and angle bounds applied to the match scoring function.
-    # --------------------------------------------------------------------------
-    distance_variance_penalty: 0.5             # Penalty applied to matches that deviate from odometry distance
-    angle_variance_penalty: 1.0               # Penalty applied to matches that deviate from odometry heading
-
-    fine_search_angle_offset: 0.00349          # Angular search range (rad) during fine tuning (~0.2 degrees)
-    coarse_search_angle_offset: 0.349          # Angular search range (rad) during coarse matching (~20 degrees)
-    coarse_angle_resolution: 0.0349            # Angular step resolution (rad) during coarse search (~2 degrees)
-    minimum_angle_penalty: 0.9                 # Floor factor for angular divergence penalty calculation
-    minimum_distance_penalty: 0.5              # Floor factor for linear divergence penalty calculation
-    use_response_expansion: true               # Allow expanding search space automatically if match quality is poor
-    min_pass_through: 2                        # Minimum beam hits required per cell to consider it occupied
-    occupancy_threshold: 0.1                   # Probability value above which map cell is marked occupied
+    fine_search_angle_offset: 0.00349     
+    coarse_search_angle_offset: 0.349   
+    coarse_angle_resolution: 0.0349        
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1
