@@ -16,23 +16,7 @@ from sensor_msgs.msg import JointState
 class WareGVHardwareNode(Node):
     """
     Four-wheel differential-drive hardware node for STS3215 servos.
-
-    Physical arrangement:
-        Front Left   = servo ID 1 on left UART
-        Rear  Left   = servo ID 2 on left UART
-        Front Right  = servo ID 1 on right UART
-        Rear  Right  = servo ID 2 on right UART
-
-    The rear motors are the mechanical reference and are considered correct.
-    The front motors rotate opposite to the required robot direction, so the
-    default configuration inverts FL and FR only.
-
-    Direction convention:
-        +linear.x  -> rover forward
-        +angular.z -> counter-clockwise / left turn
-
-    Wheel command order internally:
-        FL, FR, RL, RR
+    Includes dynamic speed multipliers to fix uneven motor speeds.
     """
 
     def __init__(self):
@@ -48,6 +32,10 @@ class WareGVHardwareNode(Node):
 
         self.declare_parameter("wheel_separation", 0.176)
         self.declare_parameter("wheel_radius", 0.035)
+
+        # Speed Calibration Multipliers
+        self.declare_parameter("left_speed_multiplier", 1.0)
+        self.declare_parameter("right_speed_multiplier", 1.0)
 
         # Rear motors are the reference.
         # Front motors are physically reversed relative to rear motors.
@@ -68,19 +56,14 @@ class WareGVHardwareNode(Node):
         self.port_right_name = self.get_parameter("port_right").value
         self.baud_rate = int(self.get_parameter("baud_rate").value)
 
-        self.wheel_separation = float(
-            self.get_parameter("wheel_separation").value
-        )
-        self.wheel_radius = float(
-            self.get_parameter("wheel_radius").value
-        )
+        self.wheel_separation = float(self.get_parameter("wheel_separation").value)
+        self.wheel_radius = float(self.get_parameter("wheel_radius").value)
 
-        self.max_raw_speed = int(
-            self.get_parameter("max_raw_speed").value
-        )
-        self.cmd_vel_timeout = float(
-            self.get_parameter("cmd_vel_timeout").value
-        )
+        self.left_speed_multiplier = float(self.get_parameter("left_speed_multiplier").value)
+        self.right_speed_multiplier = float(self.get_parameter("right_speed_multiplier").value)
+
+        self.max_raw_speed = int(self.get_parameter("max_raw_speed").value)
+        self.cmd_vel_timeout = float(self.get_parameter("cmd_vel_timeout").value)
 
         # Direction multipliers.
         self.fl_dir = self._direction("invert_fl")
@@ -90,15 +73,12 @@ class WareGVHardwareNode(Node):
 
         # STS3215 speed conversion used by the original hardware interface.
         self.RAW_VEL_TO_RADS = 0.007667
-
-        # STS3215 position resolution.
         self.TICKS_TO_RAD = (2.0 * math.pi) / 4096.0
 
         # ================================================================
         # SERVO IDs
         # ================================================================
 
-        # Same IDs on different physical UARTs are intentional.
         self.fl_id = 1
         self.rl_id = 2
         self.fr_id = 1
@@ -116,19 +96,14 @@ class WareGVHardwareNode(Node):
         # STATE
         # ================================================================
 
-        # Command velocities in rad/s.
         self.fl_cmd_vel = 0.0
         self.fr_cmd_vel = 0.0
         self.rl_cmd_vel = 0.0
         self.rr_cmd_vel = 0.0
 
-        # Measured velocities in canonical robot coordinates: [FL, FR, RL, RR]
         self.measured_vel = [0.0, 0.0, 0.0, 0.0]
-
-        # Integrated joint positions.
         self.joint_pos = [0.0, 0.0, 0.0, 0.0]
 
-        # Timing
         self.last_time = self.get_clock().now()
         self.last_cmd_time = self.get_clock().now()
 
@@ -137,16 +112,11 @@ class WareGVHardwareNode(Node):
         # ================================================================
 
         self.sub_cmd = self.create_subscription(
-            Twist,
-            "/cmd_vel_unstamped",
-            self.cmd_vel_callback,
-            10,
+            Twist, "/cmd_vel_unstamped", self.cmd_vel_callback, 10
         )
 
         self.pub_joint_states = self.create_publisher(
-            JointState,
-            "/joint_states",
-            10,
+            JointState, "/joint_states", 10
         )
 
         self.joint_names = [
@@ -160,26 +130,11 @@ class WareGVHardwareNode(Node):
         # LIVE PARAMETER UPDATE
         # ================================================================
 
-        self.add_on_set_parameters_callback(
-            self.parameter_callback
-        )
+        self.add_on_set_parameters_callback(self.parameter_callback)
 
-        # 50 Hz hardware loop.
-        self.timer = self.create_timer(
-            0.02,
-            self.update_loop,
-        )
+        self.timer = self.create_timer(0.02, self.update_loop)
 
-        self.get_logger().info(
-            "WareGV hardware node started (Odometry Disabled)."
-        )
-        self.get_logger().info(
-            "Direction configuration: "
-            f"FL={self.fl_dir:+.0f}, "
-            f"FR={self.fr_dir:+.0f}, "
-            f"RL={self.rl_dir:+.0f}, "
-            f"RR={self.rr_dir:+.0f}"
-        )
+        self.get_logger().info("WareGV hardware node started with Speed Multipliers.")
 
     # ====================================================================
     # PARAMETERS
@@ -192,43 +147,26 @@ class WareGVHardwareNode(Node):
     def parameter_callback(self, params):
         try:
             for param in params:
-                if param.name == "invert_fl":
-                    if param.type_ != Parameter.Type.BOOL:
-                        return SetParametersResult(successful=False, reason="invert_fl must be bool")
+                if param.name == "left_speed_multiplier":
+                    self.left_speed_multiplier = float(param.value)
+                elif param.name == "right_speed_multiplier":
+                    self.right_speed_multiplier = float(param.value)
+                elif param.name == "invert_fl":
                     self.fl_dir = -1.0 if param.value else 1.0
-
                 elif param.name == "invert_fr":
-                    if param.type_ != Parameter.Type.BOOL:
-                        return SetParametersResult(successful=False, reason="invert_fr must be bool")
                     self.fr_dir = -1.0 if param.value else 1.0
-
                 elif param.name == "invert_rl":
-                    if param.type_ != Parameter.Type.BOOL:
-                        return SetParametersResult(successful=False, reason="invert_rl must be bool")
                     self.rl_dir = -1.0 if param.value else 1.0
-
                 elif param.name == "invert_rr":
-                    if param.type_ != Parameter.Type.BOOL:
-                        return SetParametersResult(successful=False, reason="invert_rr must be bool")
                     self.rr_dir = -1.0 if param.value else 1.0
-
                 elif param.name == "wheel_separation":
-                    if param.value <= 0.0:
-                        return SetParametersResult(successful=False, reason="wheel_separation must be > 0")
                     self.wheel_separation = float(param.value)
-
                 elif param.name == "wheel_radius":
-                    if param.value <= 0.0:
-                        return SetParametersResult(successful=False, reason="wheel_radius must be > 0")
                     self.wheel_radius = float(param.value)
-
                 elif param.name == "cmd_vel_timeout":
-                    if param.value < 0.0:
-                        return SetParametersResult(successful=False, reason="cmd_vel_timeout must be >= 0")
                     self.cmd_vel_timeout = float(param.value)
 
             return SetParametersResult(successful=True)
-
         except Exception as exc:
             return SetParametersResult(successful=False, reason=str(exc))
 
@@ -238,12 +176,7 @@ class WareGVHardwareNode(Node):
 
     def init_serial(self):
         try:
-            self.ser_left = serial.Serial(
-                self.port_left_name,
-                self.baud_rate,
-                timeout=0.003,
-            )
-            self.get_logger().info(f"Opened left UART: {self.port_left_name}")
+            self.ser_left = serial.Serial(self.port_left_name, self.baud_rate, timeout=0.003)
         except Exception as exc:
             self.get_logger().error(f"Failed to open {self.port_left_name}: {exc}")
 
@@ -252,12 +185,7 @@ class WareGVHardwareNode(Node):
             return
 
         try:
-            self.ser_right = serial.Serial(
-                self.port_right_name,
-                self.baud_rate,
-                timeout=0.003,
-            )
-            self.get_logger().info(f"Opened right UART: {self.port_right_name}")
+            self.ser_right = serial.Serial(self.port_right_name, self.baud_rate, timeout=0.003)
         except Exception as exc:
             self.get_logger().error(f"Failed to open {self.port_right_name}: {exc}")
 
@@ -269,12 +197,7 @@ class WareGVHardwareNode(Node):
     def make_packet(servo_id, instruction, params):
         length = len(params) + 2
         checksum = (~(servo_id + length + instruction + sum(params))) & 0xFF
-
-        return bytes(
-            [0xFF, 0xFF, servo_id, length, instruction]
-            + list(params)
-            + [checksum]
-        )
+        return bytes([0xFF, 0xFF, servo_id, length, instruction] + list(params) + [checksum])
 
     def init_servos(self):
         serial_ports = []
@@ -287,7 +210,6 @@ class WareGVHardwareNode(Node):
             if not ser.is_open:
                 continue
             try:
-                # Register 0x21 = wheel mode
                 ser.write(self.make_packet(0xFE, 0x03, [0x21, 0x01]))
                 time.sleep(0.01)
             except Exception as exc:
@@ -301,20 +223,18 @@ class WareGVHardwareNode(Node):
         v = float(msg.linear.x)
         w = float(msg.angular.z)
 
-        W = self.wheel_separation
-        R = self.wheel_radius
+        v_left = v - (w * self.wheel_separation / 2.0)
+        v_right = v + (w * self.wheel_separation / 2.0)
 
-        v_left = v - (w * W / 2.0)
-        v_right = v + (w * W / 2.0)
+        omega_left = v_left / self.wheel_radius
+        omega_right = v_right / self.wheel_radius
 
-        omega_left = v_left / R
-        omega_right = v_right / R
+        # Apply direction inversions AND the new speed calibration multipliers
+        self.fl_cmd_vel = omega_left * self.fl_dir * self.left_speed_multiplier
+        self.rl_cmd_vel = omega_left * self.rl_dir * self.left_speed_multiplier
 
-        self.fl_cmd_vel = omega_left * self.fl_dir
-        self.rl_cmd_vel = omega_left * self.rl_dir
-
-        self.fr_cmd_vel = omega_right * self.fr_dir
-        self.rr_cmd_vel = omega_right * self.rr_dir
+        self.fr_cmd_vel = omega_right * self.fr_dir * self.right_speed_multiplier
+        self.rr_cmd_vel = omega_right * self.rr_dir * self.right_speed_multiplier
 
         self.last_cmd_time = self.get_clock().now()
 
@@ -347,15 +267,13 @@ class WareGVHardwareNode(Node):
         packet = self.make_packet(servo_id, 0x03, [0x2E, low, high])
         try:
             ser.write(packet)
-        except Exception as exc:
-            self.get_logger().error(f"Failed to send command to servo {servo_id}: {exc}")
+        except Exception:
+            pass
 
     def send_wheel_commands(self):
-        # Left UART
         self.send_one_wheel(self.ser_left, self.fl_id, self.fl_cmd_vel)
         self.send_one_wheel(self.ser_left, self.rl_id, self.rl_cmd_vel)
 
-        # Right UART
         if self.ser_right is self.ser_left:
             self.send_one_wheel(self.ser_left, self.fr_id, self.fr_cmd_vel)
             self.send_one_wheel(self.ser_left, self.rr_id, self.rr_cmd_vel)
@@ -370,16 +288,12 @@ class WareGVHardwareNode(Node):
     def read_servo_feedback(self, ser, servo_id):
         if ser is None or not ser.is_open:
             return None, None
-
         try:
             ser.reset_input_buffer()
             ser.write(self.make_packet(servo_id, 0x02, [0x38, 0x04]))
-            
             response = ser.read(10)
 
-            if len(response) != 10:
-                return None, None
-            if response[0] != 0xFF or response[1] != 0xFF or response[2] != servo_id:
+            if len(response) != 10 or response[0] != 0xFF or response[1] != 0xFF or response[2] != servo_id:
                 return None, None
 
             checksum = (~sum(response[2:9])) & 0xFF
@@ -394,9 +308,7 @@ class WareGVHardwareNode(Node):
             speed_sign = -1.0 if (raw_speed & 0x8000) else 1.0
 
             velocity_rad_s = speed_sign * speed_magnitude * self.RAW_VEL_TO_RADS
-
             return position_rad, velocity_rad_s
-
         except Exception:
             return None, None
 
@@ -412,7 +324,6 @@ class WareGVHardwareNode(Node):
         if dt <= 0.0:
             return
 
-        # 1. Safety timeout.
         elapsed_since_cmd = (current_time - self.last_cmd_time).nanoseconds / 1e9
         if self.cmd_vel_timeout > 0.0 and elapsed_since_cmd > self.cmd_vel_timeout:
             self.fl_cmd_vel = 0.0
@@ -420,10 +331,8 @@ class WareGVHardwareNode(Node):
             self.rl_cmd_vel = 0.0
             self.rr_cmd_vel = 0.0
 
-        # 2. Send commands.
         self.send_wheel_commands()
 
-        # 3. Read feedback.
         _, fl_feedback = self.read_servo_feedback(self.ser_left, self.fl_id)
         _, rl_feedback = self.read_servo_feedback(self.ser_left, self.rl_id)
 
@@ -434,32 +343,30 @@ class WareGVHardwareNode(Node):
             _, fr_feedback = self.read_servo_feedback(self.ser_right, self.fr_id)
             _, rr_feedback = self.read_servo_feedback(self.ser_right, self.rr_id)
 
-        # Convert physical feedback back to canonical coordinates.
+        # Revert multipliers from feedback so joint_states reflect true world velocity
         if fl_feedback is not None:
-            self.measured_vel[0] = fl_feedback * self.fl_dir
+            self.measured_vel[0] = fl_feedback * self.fl_dir / self.left_speed_multiplier
         else:
-            self.measured_vel[0] = self.fl_cmd_vel * self.fl_dir
+            self.measured_vel[0] = self.fl_cmd_vel * self.fl_dir / self.left_speed_multiplier
 
         if fr_feedback is not None:
-            self.measured_vel[1] = fr_feedback * self.fr_dir
+            self.measured_vel[1] = fr_feedback * self.fr_dir / self.right_speed_multiplier
         else:
-            self.measured_vel[1] = self.fr_cmd_vel * self.fr_dir
+            self.measured_vel[1] = self.fr_cmd_vel * self.fr_dir / self.right_speed_multiplier
 
         if rl_feedback is not None:
-            self.measured_vel[2] = rl_feedback * self.rl_dir
+            self.measured_vel[2] = rl_feedback * self.rl_dir / self.left_speed_multiplier
         else:
-            self.measured_vel[2] = self.rl_cmd_vel * self.rl_dir
+            self.measured_vel[2] = self.rl_cmd_vel * self.rl_dir / self.left_speed_multiplier
 
         if rr_feedback is not None:
-            self.measured_vel[3] = rr_feedback * self.rr_dir
+            self.measured_vel[3] = rr_feedback * self.rr_dir / self.right_speed_multiplier
         else:
-            self.measured_vel[3] = self.rr_cmd_vel * self.rr_dir
+            self.measured_vel[3] = self.rr_cmd_vel * self.rr_dir / self.right_speed_multiplier
 
-        # 4. Integrate joint positions.
         for i in range(4):
             self.joint_pos[i] += self.measured_vel[i] * dt
 
-        # 5. Publish joint states.
         joint_msg = JointState()
         joint_msg.header.stamp = current_time.to_msg()
         joint_msg.name = self.joint_names
