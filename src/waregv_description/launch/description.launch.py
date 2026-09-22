@@ -70,11 +70,16 @@ def generate_launch_description():
 
     # 4. Spawner node for diff_drive_controller
     diff_drive_broadcaster_spawner = Node(
-        package='controller_manager',
-        executable='spawner',
-        arguments=['diff_drive_controller', "--ros-args", "-r", "/odom:=/odom/wheel"],
-        output='screen'
-    )
+    package='controller_manager',
+    executable='spawner',
+    arguments=[
+        'differential_drive_controller',
+        '--ros-args',
+        '-r', '/differential_drive_controller/cmd_vel_unstamped:=/cmd_vel_unstamped',
+        '-r', '/odom:=/odom/wheel'
+    ],
+    output='screen'
+)
 
     # 5. Delay spawning joint_state_broadcaster until control_node is started
     delay_joint_state_spawner = RegisterEventHandler(

@@ -72,12 +72,13 @@ def generate_launch_description():
         waregv_bringup_dir, "config", "twist_mux.yaml"
     )
     twist_mux_node = Node(
-        package="twist_mux",
-        executable="twist_mux",
-        name="twist_mux",
-        parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
-        remappings=[("/cmd_vel_out", "/cmd_vel")],
-    )
+    package="twist_mux",
+    executable="twist_mux",
+    name="twist_mux",
+    parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
+    remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
+    output="screen"
+)
     
     efk_node_params_file = os.path.join(
         waregv_bringup_dir, "config", "ekf_filter.yaml"
