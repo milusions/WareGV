@@ -10,15 +10,14 @@ import os
 class MotorSystemNode(Node):
     def __init__(self):
         super().__init__('motor_system_node')
+        self.get_logger().info("[NODE INIT] Initializing MotorSystemNode...")
 
         # Maximum motor angular velocity limit in rad/s
         self.max_angular_velocity = 9.0
 
         # 1. Declare configuration and hardware port/servo ID parameters
-        self.declare_parameter(
-            name="config_file", 
-            value=os.path.join(get_package_share_directory("waregv_hardware"), "config", "system_config.yaml")
-        )
+        default_config = os.path.join(get_package_share_directory("waregv_hardware"), "config", "system_config.yaml")
+        self.declare_parameter(name="config_file", value=default_config)
         self.declare_parameter(name="port_name_left", value="/dev/ttyACM3")
         self.declare_parameter(name="port_name_right", value="/dev/ttyACM5")
         self.declare_parameter(name="front_servo_id", value=1)
@@ -31,8 +30,15 @@ class MotorSystemNode(Node):
         self.front_servo_id = self.get_parameter("front_servo_id").value
         self.rear_servo_id = self.get_parameter("rear_servo_id").value
 
+        self.get_logger().info(f"[NODE PARAMS] config_file: {self.config_file}")
+        self.get_logger().info(f"[NODE PARAMS] port_name_left: {self.port_name_left}, front_servo_id: {self.front_servo_id}, rear_servo_id: {self.rear_servo_id}")
+        self.get_logger().info(f"[NODE PARAMS] port_name_right: {self.port_name_right}, front_servo_id: {self.front_servo_id}, rear_servo_id: {self.rear_servo_id}")
+
         # 3. Instantiate the system
+        self.get_logger().info("[NODE STATE] Instantiating MotorSystem helper class...")
         self.system = MotorSystem(config_file=self.config_file)
+        
+        self.get_logger().info("[NODE STATE] Starting MotorSystem threads...")
         self.system.start()
 
         # Subscriber for velocity commands
@@ -42,6 +48,7 @@ class MotorSystemNode(Node):
             self.command_callback,
             10
         )
+        self.get_logger().info("[NODE STATE] Subscribed to /motor_system/commands")
 
         # Publisher for clipped commands (for logging/debugging)
         self.clipped_cmd_pub = self.create_publisher(
@@ -49,6 +56,7 @@ class MotorSystemNode(Node):
             '/motor_system/clipped_commands',
             10
         )
+        self.get_logger().info("[NODE STATE] Publishing clipped commands to /motor_system/clipped_commands")
 
         # Publisher for joint states
         self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
@@ -67,11 +75,12 @@ class MotorSystemNode(Node):
         # Internal position tracking (integration of velocity over time)
         self.positions = [0.0, 0.0, 0.0, 0.0]
 
-        self.get_logger().info("Motor controller node started with velocity clipping (max: 9.0 rad/s).")
+        self.get_logger().info("[NODE INIT] Motor controller node fully started and running.")
 
     def command_callback(self, msg: Float64MultiArray):
+        self.get_logger().info(f"[CALLBACK RECEIVED] /motor_system/commands data: {msg.data}")
         if len(msg.data) < 4:
-            self.get_logger().error("Expected at least 4 velocity values in the array.")
+            self.get_logger().error(f"[CALLBACK ERROR] Expected at least 4 velocity values, got {len(msg.data)}")
             return
 
         # Unpack angular velocities (rad/s)
@@ -82,6 +91,9 @@ class MotorSystemNode(Node):
         fr_clipped = max(-self.max_angular_velocity, min(self.max_angular_velocity, fr_rads))
         rl_clipped = max(-self.max_angular_velocity, min(self.max_angular_velocity, rl_rads))
         rr_clipped = max(-self.max_angular_velocity, min(self.max_angular_velocity, rr_rads))
+
+        self.get_logger().info(f"[CLIPPING STATE] Raw: FL={fl_rads:.2f}, FR={fr_rads:.2f}, RL={rl_rads:.2f}, RR={rr_rads:.2f}")
+        self.get_logger().info(f"[CLIPPING STATE] Clipped: FL={fl_clipped:.2f}, FR={fr_clipped:.2f}, RL={rl_clipped:.2f}, RR={rr_clipped:.2f}")
 
         # Publish the clipped commands for logging and monitoring purposes
         clipped_msg = Float64MultiArray()
@@ -95,6 +107,8 @@ class MotorSystemNode(Node):
         fr_rpm = fr_clipped * conversion_factor
         rl_rpm = rl_clipped * conversion_factor
         rr_rpm = rr_clipped * conversion_factor
+
+        self.get_logger().info(f"[RPM CONVERSION] Target RPMs -> FL: {fl_rpm:.2f}, FR: {fr_rpm:.2f}, RL: {rl_rpm:.2f}, RR: {rr_rpm:.2f}")
 
         # Update the target RPM for each servo via the helper class
         self.system.set_target_rpm(self.port_name_left, self.front_servo_id, fl_rpm)
@@ -138,9 +152,10 @@ class MotorSystemNode(Node):
         msg.velocity = velocities
         
         self.joint_pub.publish(msg)
+        # self.get_logger().debug(f"[JOINT STATE PUBLISH] Positions: {self.positions}, Velocities: {velocities}")
 
     def destroy_node(self):
-        # Halts the motors, shuts down threads, and exports the log
+        self.get_logger().info("[NODE DESTROY] Shutting down MotorSystemNode...")
         self.system.stop()
         super().destroy_node()
 
