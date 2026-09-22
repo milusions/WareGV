@@ -27,7 +27,7 @@ class MotorSystem:
         
         # Shared state dictionaries for threading
         self.shared_targets = {port: {sid: 0.0 for sid in self.servo_ids} for port in self.ports}
-        self.shared_measured = {port: {sid: 0.0 for sid in self.servo_ids} for port in self.ports} # FIX: Added physical feedback dict
+        self.shared_measured = {port: {sid: 0.0 for sid in self.servo_ids} for port in self.ports}
         
         self.log_results = {}
         self.stop_event = threading.Event()
@@ -54,8 +54,11 @@ class MotorSystem:
                     for sid in self.servo_ids:
                         current_target_rpm = self.shared_targets[port][sid]
                         if current_target_rpm != last_targets[sid]:
-                            driver.set_rpm(sid, current_target_rpm)
-                            last_targets[sid] = current_target_rpm
+                            # Only update last_targets if the hardware write was successful.
+                            # This prevents the motor from permanently latching if a serial error occurs.
+                            success = driver.set_rpm(sid, current_target_rpm)
+                            if success:
+                                last_targets[sid] = current_target_rpm
 
                         # Read Current Speed and expose it to the ROS node
                         measured_rpm = driver.get_rpm(sid)

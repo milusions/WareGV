@@ -28,19 +28,11 @@ class PortGroupDriver:
             
             # Torque must be off before changing operating mode
             self.original_modes[sid] = servo.eeprom.read_operating_mode()
-            print(f"[PortGroupDriver SETUP] Servo {sid} on {self.port}: Original Operating Mode = {self.original_modes[sid]}")
             
             servo.sram.torque_disable()
-            print(f"[PortGroupDriver SETUP] Servo {sid} on {self.port}: Torque DISABLED for mode configuration.")
-            
             servo.eeprom.write_operating_mode(1) # Mode 1 = Constant Speed
-            print(f"[PortGroupDriver SETUP] Servo {sid} on {self.port}: Operating mode set to 1 (Constant Speed).")
-            
             servo.sram.torque_enable()
-            print(f"[PortGroupDriver SETUP] Servo {sid} on {self.port}: Torque ENABLED.")
-            
             servo.sram.write_running_speed(0)
-            print(f"[PortGroupDriver SETUP] Servo {sid} on {self.port}: Running speed initialized to 0 steps.")
             
         print(f"[PortGroupDriver ENTER] Port {self.port} successfully configured and ready.")
         return self
@@ -51,14 +43,9 @@ class PortGroupDriver:
         for sid in self.servo_ids:
             try:
                 self.servos[sid].sram.write_running_speed(0)
-                print(f"[PortGroupDriver TEARDOWN] Servo {sid} on {self.port}: Speed set to 0.")
                 time.sleep(0.1) # Brief delay to ensure stop command registers
-                
                 self.servos[sid].sram.torque_disable()
-                print(f"[PortGroupDriver TEARDOWN] Servo {sid} on {self.port}: Torque disabled.")
-                
                 self.servos[sid].eeprom.write_operating_mode(self.original_modes[sid])
-                print(f"[PortGroupDriver TEARDOWN] Servo {sid} on {self.port}: Restored original mode {self.original_modes[sid]}.")
             except Exception as e:
                 print(f"[PortGroupDriver ERROR] Error cleaning up Servo {sid} on {self.port}: {e}")
             
@@ -66,33 +53,49 @@ class PortGroupDriver:
         print(f"[PortGroupDriver EXIT] Port {self.port} controller closed cleanly.")
 
     def set_rpm(self, servo_id, rpm):
-        """Calculates step speed and updates the servo. Anti-clockwise is positive."""
-        raw_steps = -int((rpm * self.steps_per_rev) / 60)
+        """
+        Calculates step speed and updates the servo.
+        ST3215 Spec: Bit 15=0 is CCW (Positive), Bit 15=1 is CW (Negative).
+        """
+        magnitude = int(abs(rpm) * self.steps_per_rev / 60)
         
-        # FIX: Feetech uses Bit 15 for direction (1 = CW/Negative, 0 = CCW/Positive)
-        if raw_steps < 0:
-            encoded_steps = (1 << 15) | abs(raw_steps)
+        if magnitude == 0:
+            encoded_steps = 0
+        elif rpm > 0:
+            # Positive RPM -> CCW -> Bit 15 is 0
+            encoded_steps = magnitude
         else:
-            encoded_steps = raw_steps
-            
-        print(f"[HW WRITE] Port: {self.port} | Servo {servo_id} -> Target RPM: {rpm:.2f} | Encoded Steps: {encoded_steps}")
+            # Negative RPM -> CW -> Bit 15 is 1
+            # Passed as a signed negative integer so the library's [-32766, 32766] bounds-check accepts it
+            encoded_steps = -32768 + magnitude
+            if encoded_steps < -32766:
+                encoded_steps = -32766 # Prevent library crash at near-zero speeds
+                
+        # print(f"[HW WRITE] Port: {self.port} | Servo {servo_id} -> Target RPM: {rpm:.2f} | Encoded Steps: {encoded_steps}")
         try:
             self.servos[servo_id].sram.write_running_speed(encoded_steps)
+            return True # Successfully sent
         except Exception as e:
             print(f"[HW WRITE ERROR] Failed to write speed to Servo {servo_id} on {self.port}: {e}")
+            return False # Failed to send
 
     def get_rpm(self, servo_id):
-        """Reads current speed and converts to RPM. Anti-clockwise is positive."""
+        """Reads current speed and converts to RPM. Positive is CCW, Negative is CW."""
         try:
             speed_steps = self.servos[servo_id].sram.read_current_speed()
             if speed_steps is not None:
-                # FIX: Decode Bit 15 direction flag
-                if speed_steps & (1 << 15):
-                    actual_steps = -(speed_steps & 0x7FFF)
+                # The python_st3215 library unpacks this as a 16-bit signed int.
+                # Mask it back to raw unsigned 16-bit to safely read Bit 15 without two's-complement weirdness.
+                unsigned_val = speed_steps & 0xFFFF
+                
+                # Bit 15 indicates direction (1 = CW/Negative, 0 = CCW/Positive)
+                if unsigned_val & 0x8000:
+                    magnitude = unsigned_val & 0x7FFF
+                    rpm = -(magnitude * 60) / self.steps_per_rev
                 else:
-                    actual_steps = speed_steps
+                    magnitude = unsigned_val
+                    rpm = (magnitude * 60) / self.steps_per_rev
                     
-                rpm = -(actual_steps * 60) / self.steps_per_rev
                 return rpm
         except Exception as e:
             print(f"[HW READ ERROR] Failed to read speed from Servo {servo_id} on {self.port}: {e}")
