@@ -65,7 +65,7 @@ slam_toolbox:
     use_scan_barycenter: true                  # Compute scan registration relative to the laser points' center of mass
     minimum_travel_distance: 0.5               # Linear distance (m) robot must move before processing a new scan keyframe
     minimum_travel_heading: 0.5                # Angular rotation (rad) robot must turn before processing a new scan keyframe
-    check_min_dist_and_heading_precisely: false# Evaluate both distance AND heading simultaneously before adding keyframe
+    check_min_dist_and_heading_precisely: true    # Evaluate both distance AND heading simultaneously before adding keyframe
     scan_buffer_size: 10                       # Number of recent scans kept in working buffer for local matching
     scan_buffer_maximum_scan_distance: 10.0    # Maximum search radius (m) for scans stored in working buffer
     link_match_minimum_response_fine: 0.1      # Minimum scan match threshold quality to add a consecutive graph link
