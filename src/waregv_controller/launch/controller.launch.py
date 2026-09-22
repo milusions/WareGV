@@ -41,6 +41,12 @@ def generate_launch_description():
             parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
             output="screen",
         )
+    motor_controller_node = Node(
+        package="waregv_controller",
+        executable="motor_controller",
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+        output="screen",
+    )
     return LaunchDescription([
                                 use_sim_time_arg,
                                 wheel_radius_arg,
@@ -49,6 +55,6 @@ def generate_launch_description():
                             max_angular_velocity_arg,
                               joystick_node,
                               waregv_controller,
-                              imu_chasis_node
-                              
+                              imu_chasis_node,
+                              motor_controller_node
                              ])

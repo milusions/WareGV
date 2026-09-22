@@ -100,7 +100,7 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         robot_state_publisher,
-        control_node,
-        delay_joint_state_spawner,
-        delay_diff_drive_spawner
+        # control_node,
+        # delay_joint_state_spawner,
+        # delay_diff_drive_spawner
     ])
