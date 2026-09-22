@@ -34,7 +34,7 @@ def generate_launch_description():
     
     motor_system_node = Node(
         package="waregv_hardware",
-        executable="motor_system",
+        executable="motor_system_node",
         parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
         output="screen",
     )

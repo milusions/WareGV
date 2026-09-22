@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import time
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
@@ -11,8 +12,18 @@ class IMUChasis(Node):
         super().__init__('imu_node')
         self.pub = self.create_publisher(Imu, '/imu/chasis', 10)
         
-        # Initialize I2C Bus 1 and the BNO055 sensor
+        # Initialize I2C Bus 1
         self.i2c = I2C(1)
+        
+        # Force BNO055 into CONFIG_MODE (Register 0x3F = 0x00) before driver init
+        # to prevent "Mode must not be a fusion mode" startup crashes.
+        try:
+            self.i2c.writeto(0x28, bytes([0x3F, 0x00]))
+            time.sleep(0.05)
+        except Exception as e:
+            self.get_logger().warn(f"Could not force BNO055 config mode via I2C: {e}")
+
+        # Initialize the BNO055 sensor
         self.bno = adafruit_bno055.BNO055_I2C(self.i2c)
         
         # Pre-allocate message to eliminate loop memory allocation overhead

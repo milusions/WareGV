@@ -42,7 +42,7 @@ setup(
     entry_points={
         'console_scripts': [
               "imu_chasis_relay=waregv_hardware.imu_chasis_relay:main",
-                                                       "motor_system=waregv_hardware.motor_system:main"
+                                                       "motor_system_node=waregv_hardware.motor_system_node:main"
         ],
     },
 )
