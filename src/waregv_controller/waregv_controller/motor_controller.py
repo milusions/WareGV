@@ -41,7 +41,7 @@ class WareGVHardwareNode(Node):
         self.declare_parameter('publish_tf', True)
 
         # --- Individual Wheel Direction Inversion Flags ---
-        self.declare_parameter('invert_fl', True)   # Front-Left
+        self.declare_parameter('invert_fl', False)   # Front-Left
         self.declare_parameter('invert_rl', True)   # Rear-Left
         self.declare_parameter('invert_fr', True)   # Front-Right
         self.declare_parameter('invert_rr', False)  # Rear-Right
