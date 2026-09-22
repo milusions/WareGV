@@ -10,7 +10,7 @@
             <xacro:unless value="$(arg sim_mode)">
                 <plugin>waregv_hardware/STS3215ServoControlDriver</plugin>
                 <param name="port_left">/dev/ttyAMA3</param>
-                <param name="port_right">/dev/ttyAMA4</param>
+                <param name="port_right">/dev/ttyAMA5</param>
                 <param name="baud_rate">1000000</param>
             </xacro:unless>
         </hardware>
