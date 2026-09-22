@@ -1,0 +1,11 @@
+# Hardware definitions
+ports:
+  - "/dev/ttyACM3"
+  - "/dev/ttyACM5"
+
+servo_ids: [1, 2] 
+
+# Operational configurations
+steps_per_rev: 4096
+sample_rate_hz: 10
+log_filename: "motor_system.log"
