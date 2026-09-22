@@ -237,6 +237,7 @@ class WareGVHardwareNode(Node):
         self.rr_cmd_vel = omega_right * self.rr_dir * self.right_speed_multiplier
 
         self.last_cmd_time = self.get_clock().now()
+        self.get_logger().debug(f"Received cmd_vel: v={v:.3f}, w={w:.3f}, fl={self.fl_cmd_vel:.3f}, fr={self.fr_cmd_vel:.3f}, rl={self.rl_cmd_vel:.3f}, rr={self.rr_cmd_vel:.3f}")
 
     # ====================================================================
     # VELOCITY CONVERSION
