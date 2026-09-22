@@ -80,19 +80,19 @@ def generate_launch_description():
     output="screen"
 )
     
-    efk_node_params_file = os.path.join(
-        waregv_bringup_dir, "config", "ekf_filter.yaml"
-    )
+#     efk_node_params_file = os.path.join(
+#         waregv_bringup_dir, "config", "ekf_filter.yaml"
+#     )
 
-    robot_localization_node = Node(
-    package="robot_localization",  # Fixed package name
-    executable="ekf_node",
-    name="ekf_filter_node",
-    parameters=[efk_node_params_file],
-    remappings=[
-        ('odometry/filtered', '/odometry/filtered')
-    ]
-)
+#     robot_localization_node = Node(
+#     package="robot_localization",  # Fixed package name
+#     executable="ekf_node",
+#     name="ekf_filter_node",
+#     parameters=[efk_node_params_file],
+#     remappings=[
+#         ('odometry/filtered', '/odometry/filtered')
+#     ]
+# )
 
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
@@ -109,6 +109,21 @@ def generate_launch_description():
             "wheel_base": wheel_base_conf,
         }.items(),
     )
+    
+    waregv_odometry_launch_file_path = os.path.join(
+            get_package_share_directory("waregv_odometry"),
+            "launch",
+            "odometry.launch.py",
+        )
+    waregv_odometry = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
+            launch_arguments={
+                "use_sim_time": use_sim_time,
+               
+                "wheel_radius": wheel_radius_conf,
+         
+            }.items(),
+        )
 
     waregv_mapping_launch_file_path = os.path.join(
         get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
@@ -184,7 +199,7 @@ def generate_launch_description():
             waregv_description,
             waregv_hardware,
             twist_mux_node,
-            robot_localization_node,
+            waregv_odometry,
             waregv_controller,
             waregv_mapping,
             waregv_navigation,

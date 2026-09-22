@@ -70,7 +70,7 @@ bt_navigator:
   ros__parameters:
     global_frame: map                 # Global reference frame
     robot_base_frame: base_footprint       # Robot base frame
-    odom_topic:    /odometry/filtered              # Odometry topic used for internal tracking
+    odom_topic:    /odom              # Odometry topic used for internal tracking
     bt_loop_duration: 10              # Duration (ms) of each execution step of the Behavior Tree
     default_server_timeout: 20        # Timeout (ms) when waiting for action servers to respond
     wait_for_service_timeout: 1000    # Timeout (ms) when waiting for critical services
