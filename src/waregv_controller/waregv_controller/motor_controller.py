@@ -138,9 +138,12 @@ class WareGVHardwareNode(Node):
         v_left = v - (w * self.W / 2.0)
         v_right = v + (w * self.W / 2.0)
 
-        # Convert wheel linear velocity (m/s) to angular velocity (rad/s)
-        self.left_cmd_vel = v_left / self.R
-        self.right_cmd_vel = v_right / self.R
+        left_direction = -1.0
+        right_direction = 1.0
+
+        # Convert wheel linear velocity (m/s) to angular velocity (rad/s) with inverted direction
+        self.left_cmd_vel = (v_left / self.R) * left_direction
+        self.right_cmd_vel = (v_right / self.R) * right_direction
 
     def rads_to_raw_speed(self, rad_s):
         raw_speed = int(abs(rad_s) / self.RAW_VEL_TO_RADS)

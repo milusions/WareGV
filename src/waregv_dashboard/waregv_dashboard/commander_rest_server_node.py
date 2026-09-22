@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import specialized modules
 from waregv_dashboard.manual_drive import ManualDriveManager
 from waregv_dashboard.autonomous_drive import AutonomousDriveManager
+from waregv_dashboard.eyes_driver import EyesDriver
 
 app = FastAPI(title="Navigation Commander REST Server")
 api_node = None
@@ -50,6 +51,7 @@ WEB_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "web")
 HTML_FILE_PATH = os.path.join(WEB_DIR, "index.html")
 LOG_DIR = os.path.join(HOME_DIR, "waregv", "waregv_ws", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
+EYES_PORT = os.environ.get("EYES_PORT", "/dev/arduino_nano")
 
 
 def quaternion_to_yaw(q):
@@ -95,10 +97,28 @@ class CommanderRestAPINode(Node):
         self.manual_manager = ManualDriveManager(self)
         self.autonomous_manager = AutonomousDriveManager(self)
 
+        self.eyes = EyesDriver(port=EYES_PORT, logger=self.get_logger())
+
         self.get_logger().info("Commander REST API Node initialized with 100% complete endpoints.")
 
     def _status_cb(self, msg):
-        self.nav_status = msg.data
+        new_status = msg.data
+        if new_status != self.nav_status:
+            self._on_nav_status_change(new_status)
+        self.nav_status = new_status
+
+    def _on_nav_status_change(self, new_status: str):
+        """Drive the physical eyes off real nav status transitions."""
+        s = (new_status or "").upper()
+        try:
+            if any(k in s for k in ("FAIL", "ABORT", "ERROR")):
+                self.eyes.error(s[:22])
+            elif any(k in s for k in ("SUCCEED", "SUCCESS", "REACHED", "COMPLETE")):
+                self.eyes.nav("GOAL REACHED", hold_ms=3000)
+            elif any(k in s for k in ("NAVIGAT", "ACTIVE", "RUNNING", "EXECUT")):
+                self.eyes.nav("NAVIGATING", hold_ms=3000)
+        except Exception as e:
+            self.get_logger().warn(f"eyes update failed: {e}")
 
     def _feedback_cb(self, msg):
         try:
@@ -216,6 +236,7 @@ class CommanderRestAPINode(Node):
     def shutdown_managers(self):
         self.manual_manager.kill_processes()
         self.autonomous_manager.kill_processes()
+        self.eyes.close()
 
 
 # Request models
@@ -244,6 +265,11 @@ class ModeRequest(BaseModel):
 
 class MapRequest(BaseModel):
     map_name: str
+
+class EyesEventRequest(BaseModel):
+    type: str            # idle | listening | speaking | thinking | bubble | error
+    text: str = ""
+    level: int = 0
 
 
 def safe_map_name(name: str) -> str:
@@ -559,6 +585,27 @@ def http_slam_status():
         "slam_toolbox_active": any("slam_toolbox" in n for n in names),
         "serialized_map_root": SLAM_MAP_ROOT,
     }
+
+@app.post("/eyes/event")
+def http_eyes_event(req: EyesEventRequest):
+    """Called by app.js (Helio, the browser voice assistant) so its state
+    drives the physical OLED eyes on the Nano through this same process."""
+    t = (req.type or "").lower()
+    if t == "idle":
+        api_node.eyes.idle()
+    elif t == "listening":
+        api_node.eyes.listen(req.level)
+    elif t == "speaking":
+        api_node.eyes.speak(req.level)
+    elif t == "thinking":
+        api_node.eyes.think()
+    elif t == "bubble":
+        api_node.eyes.bubble(req.text)
+    elif t == "error":
+        api_node.eyes.error(req.text)
+    else:
+        raise HTTPException(400, f"Unknown eyes event type: {req.type}")
+    return {"status": "dispatched", "type": t}
 
 @app.post("/manual_drive")
 def http_manual_drive(req: DriveRequest):
