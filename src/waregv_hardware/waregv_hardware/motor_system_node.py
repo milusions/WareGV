@@ -20,7 +20,7 @@ class MotorSystemNode(Node):
             value=os.path.join(get_package_share_directory("waregv_hardware"), "config", "system_config.yaml")
         )
         self.declare_parameter(name="port_name_left", value="/dev/ttyACM3")
-        self.declare_parameter(name="port_name_right", value="/dev/ACM5")
+        self.declare_parameter(name="port_name_right", value="/dev/ttyACM5")
         self.declare_parameter(name="front_servo_id", value=1)
         self.declare_parameter(name="rear_servo_id", value=2)
 
