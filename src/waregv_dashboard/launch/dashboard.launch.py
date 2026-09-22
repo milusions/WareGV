@@ -28,5 +28,5 @@ def generate_launch_description():
     return LaunchDescription([
  
         commander_node,
-        # commander_rest_server_node
+        commander_rest_server_node
     ])

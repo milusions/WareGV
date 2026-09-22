@@ -43,7 +43,7 @@ class WareGVHardwareNode(Node):
         # --- Individual Wheel Direction Inversion Flags ---
         # Change to True if a specific motor rotates backward relative to its intended direction
         self.declare_parameter('invert_fl', True)   # Front-Left (ID 1 on left port)
-        self.declare_parameter('invert_rl', False)  # Rear-Left  (ID 2 on left port) - FLIPPED TO FIX LEFT TURN
+        self.declare_parameter('invert_rl', True)  # Rear-Left  (ID 2 on left port) - FLIPPED TO FIX LEFT TURN
         self.declare_parameter('invert_fr', False)  # Front-Right (ID 1 on right port)
         self.declare_parameter('invert_rr', False)  # Rear-Right (ID 2 on right port)
 
