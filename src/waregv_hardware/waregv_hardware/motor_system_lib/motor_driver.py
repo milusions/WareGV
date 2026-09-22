@@ -67,10 +67,17 @@ class PortGroupDriver:
 
     def set_rpm(self, servo_id, rpm):
         """Calculates step speed and updates the servo. Anti-clockwise is positive."""
-        steps = -int((rpm * self.steps_per_rev) / 60)
-        print(f"[HW WRITE] Port: {self.port} | Servo {servo_id} -> Target RPM: {rpm:.2f} | Calculated Steps: {steps}")
+        raw_steps = -int((rpm * self.steps_per_rev) / 60)
+        
+        # FIX: Feetech uses Bit 15 for direction (1 = CW/Negative, 0 = CCW/Positive)
+        if raw_steps < 0:
+            encoded_steps = (1 << 15) | abs(raw_steps)
+        else:
+            encoded_steps = raw_steps
+            
+        print(f"[HW WRITE] Port: {self.port} | Servo {servo_id} -> Target RPM: {rpm:.2f} | Encoded Steps: {encoded_steps}")
         try:
-            self.servos[servo_id].sram.write_running_speed(steps)
+            self.servos[servo_id].sram.write_running_speed(encoded_steps)
         except Exception as e:
             print(f"[HW WRITE ERROR] Failed to write speed to Servo {servo_id} on {self.port}: {e}")
 
@@ -79,8 +86,13 @@ class PortGroupDriver:
         try:
             speed_steps = self.servos[servo_id].sram.read_current_speed()
             if speed_steps is not None:
-                rpm = -(speed_steps * 60) / self.steps_per_rev
-                # print(f"[HW READ] Port: {self.port} | Servo {servo_id} -> Raw Steps: {speed_steps} | Measured RPM: {rpm:.2f}")
+                # FIX: Decode Bit 15 direction flag
+                if speed_steps & (1 << 15):
+                    actual_steps = -(speed_steps & 0x7FFF)
+                else:
+                    actual_steps = speed_steps
+                    
+                rpm = -(actual_steps * 60) / self.steps_per_rev
                 return rpm
         except Exception as e:
             print(f"[HW READ ERROR] Failed to read speed from Servo {servo_id} on {self.port}: {e}")

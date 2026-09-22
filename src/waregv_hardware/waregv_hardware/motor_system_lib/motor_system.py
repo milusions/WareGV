@@ -24,13 +24,10 @@ class MotorSystem:
 
         print(f"[MotorSystem CONFIG] Ports configured: {self.ports}")
         print(f"[MotorSystem CONFIG] Servo IDs configured: {self.servo_ids}")
-        print(f"[MotorSystem CONFIG] Log filename: {self.log_filename}")
-
-        # Shared state dictionary: shared_targets[port][servo_id] = target_rpm
-        self.shared_targets = {
-            port: {sid: 0.0 for sid in self.servo_ids} 
-            for port in self.ports
-        }
+        
+        # Shared state dictionaries for threading
+        self.shared_targets = {port: {sid: 0.0 for sid in self.servo_ids} for port in self.ports}
+        self.shared_measured = {port: {sid: 0.0 for sid in self.servo_ids} for port in self.ports} # FIX: Added physical feedback dict
         
         self.log_results = {}
         self.stop_event = threading.Event()
@@ -43,14 +40,9 @@ class MotorSystem:
         sample_rate_hz = self.config.get("sample_rate_hz", 10)
         sleep_time = 1.0 / sample_rate_hz
 
-        # Initialize thread-local log structure
         port_log = {}
         for sid in self.servo_ids:
-            port_log[str(sid)] = {
-                "timestamp": [],
-                "velocity_target": [],
-                "measured_velocity": []
-            }
+            port_log[str(sid)] = {"timestamp": [], "velocity_target": [], "measured_velocity": []}
 
         last_targets = {sid: 0.0 for sid in self.servo_ids}
 
@@ -60,65 +52,46 @@ class MotorSystem:
                     loop_start = time.time()
 
                     for sid in self.servo_ids:
-                        # 1. Update Target Speed if changed in main thread
                         current_target_rpm = self.shared_targets[port][sid]
                         if current_target_rpm != last_targets[sid]:
-                            print(f"[THREAD STATE CHANGE] Port {port} | Servo {sid}: Target RPM changed from {last_targets[sid]:.2f} to {current_target_rpm:.2f}")
                             driver.set_rpm(sid, current_target_rpm)
                             last_targets[sid] = current_target_rpm
 
-                        # 2. Read Current Speed
+                        # Read Current Speed and expose it to the ROS node
                         measured_rpm = driver.get_rpm(sid)
+                        self.shared_measured[port][sid] = measured_rpm
 
-                        # 3. Log Data (Timestamp in nanoseconds)
                         port_log[str(sid)]["timestamp"].append(time.time_ns())
                         port_log[str(sid)]["velocity_target"].append(current_target_rpm)
                         port_log[str(sid)]["measured_velocity"].append(measured_rpm)
 
-                    # Maintain sample rate
                     elapsed = time.time() - loop_start
                     time.sleep(max(0, sleep_time - elapsed))
 
         except Exception as e:
             print(f"\n[THREAD ERROR on {port}]: {e}")
         finally:
-            # Save the collected data back to the instance dictionary upon exit
             self.log_results[port] = port_log
             print(f"[THREAD EXIT] Worker thread for port {port} terminated and logs stored.")
 
     def start(self):
-        """Starts the background control and logging threads."""
-        print("[MotorSystem START] Initializing background control and logging threads...")
         self.stop_event.clear()
         self.threads = []
-        
         for port in self.ports:
-            print(f"[MotorSystem START] Launching thread for port: {port}")
-            t = threading.Thread(target=self._port_worker, args=(port,))
+            t = threading.Thread(target=self._port_worker, args=(port,), daemon=True)
             t.start()
             self.threads.append(t)
-        print("[MotorSystem START] System Ready. All servos holding at 0 RPM.")
 
     def set_target_rpm(self, port, servo_id, rpm):
-        """Updates the target RPM for a specific servo."""
-        if port not in self.shared_targets:
-            raise ValueError(f"Port '{port}' not found in configuration.")
-        if servo_id not in self.shared_targets[port]:
-            raise ValueError(f"Servo ID '{servo_id}' not initialized on port '{port}'.")
-            
-        print(f"[MotorSystem STATE UPDATE] Setting requested target -> Port: {port} | Servo ID: {servo_id} | RPM: {rpm:.2f}")
         self.shared_targets[port][servo_id] = float(rpm)
 
-    def stop(self):
-        """Halts the motors, shuts down threads, and exports the log."""
-        print("\n[MotorSystem STOP] Shutting down motors and saving logs... Please wait.")
-        self.stop_event.set()
-        
-        for t in self.threads:
-            t.join()
+    def get_current_rpm(self, port, servo_id):
+        """Getter for the true hardware velocity."""
+        return self.shared_measured[port][servo_id]
 
-        print(f"[MotorSystem STOP] Writing logs to {self.log_filename}...")
+    def stop(self):
+        self.stop_event.set()
+        for t in self.threads:
+            t.join(timeout=1.0)
         with open(self.log_filename, "w") as log_file:
             json.dump(self.log_results, log_file, indent=4)
-            
-        print(f"[MotorSystem STOP] Shutdown complete. Data safely written to {self.log_filename}.")
