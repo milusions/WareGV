@@ -69,8 +69,8 @@ class WareGVHardwareNode(Node):
         # Rear motors are the reference.
         # Front motors are physically reversed relative to rear motors.
         self.declare_parameter("invert_fl", True)
-        self.declare_parameter("invert_fr", True)
-        self.declare_parameter("invert_rl", False)
+        self.declare_parameter("invert_fr", False)
+        self.declare_parameter("invert_rl", True)
         self.declare_parameter("invert_rr", False)
 
         # Servo protocol parameters.
