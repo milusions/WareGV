@@ -1,9 +1,0 @@
-<library path="waregv_hardware">
-  <class name="waregv_hardware/STS3215ServoControlDriver"
-         type="waregv_hardware::STS3215ServoControlDriver"
-         base_class_type="hardware_interface::SystemInterface">
-    <description>
-      ros2_control hardware interface plugin for Feetech STS3215 servos on 4-wheel diff drive.
-    </description>
-  </class>
-</library>

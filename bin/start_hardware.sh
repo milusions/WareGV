@@ -19,8 +19,6 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
-echo "Allowing system resources 5 seconds to settle..."
-sleep 5
 
 MAPPING_ENABLE="true"
 NAVIGATION_ENABLE="true"

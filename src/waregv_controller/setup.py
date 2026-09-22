@@ -41,9 +41,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "joystick_control=waregv_controller.joystick_controller:main",
-                        "imu_chasis=waregv_controller.imu_chasis:main",
-                                           "motor_controller=waregv_controller.motor_controller:main"
+            "joystick_relay=waregv_controller.joystick_relay:main",
+                      
                         
         ],
     },

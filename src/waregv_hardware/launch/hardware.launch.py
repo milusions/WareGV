@@ -10,7 +10,6 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
     
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='false')
-    use_sim_time = LaunchConfiguration("use_sim_time")
     
     ydlidar_dir = get_package_share_directory('ydlidar_ros2_driver')
 
@@ -23,32 +22,44 @@ def generate_launch_description():
             output='screen',
    parameters=[config_file_path, {"reversion": True, "inverted": True}],
         )
+       
 
-
-   
+    imu_chasis_relay_node = Node(
+            package="waregv_hardware",
+            executable="imu_chasis_relay",
+            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+            output="screen",
+        )
     
-
-    realsense_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory('realsense2_camera'),
-                'launch',
-                'rs_launch.py'
-            )
-        ]),
-        launch_arguments={
-            'enable_accel': 'true',
-            'enable_gyro': 'true',
-            'unite_imu_method': '2',     
-            'enable_infra1': 'true',      
-            'enable_infra2': 'true',       
-            'enable_sync': 'true',    
-        }.items()
+    
+    motor_system_node = Node(
+        package="waregv_hardware",
+        executable="motor_system",
+        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+        output="screen",
     )
+
+    # realsense_launch = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource([
+    #         os.path.join(
+    #             get_package_share_directory('realsense2_camera'),
+    #             'launch',
+    #             'rs_launch.py'
+    #         )
+    #     ]),
+    #     launch_arguments={
+    #         'enable_accel': 'true',
+    #         'enable_gyro': 'true',
+    #         'unite_imu_method': '2',     
+    #         'enable_infra1': 'true',      
+    #         'enable_infra2': 'true',       
+    #         'enable_sync': 'true',    
+    #     }.items()
+    # )
     
     return LaunchDescription([
         use_sim_time_arg,  
         ydlidar_node,
-      
-        # realsense_launch
+        imu_chasis_relay_node,
+        motor_system_node
     ])

@@ -12,7 +12,6 @@ def generate_launch_description():
     wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.0385')
     wheel_base_arg = DeclareLaunchArgument(name="wheel_base", default_value='0.158')
     
-    
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value='true')
     
     joystick_node = Node(
@@ -30,23 +29,12 @@ def generate_launch_description():
     
     waregv_controller = Node(
         package="waregv_controller",
-        executable="joystick_control",
+        executable="joystick_relay",
          parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "max_linear_vel":LaunchConfiguration('max_linear_velocity'), "max_angular_vel":LaunchConfiguration('max_angular_velocity')}],
         output="screen",
     )
         
-    imu_chasis_node = Node(
-            package="waregv_controller",
-            executable="imu_chasis",
-            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
-            output="screen",
-        )
-    motor_controller_node = Node(
-        package="waregv_controller",
-        executable="motor_controller",
-        parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
-        output="screen",
-    )
+
     return LaunchDescription([
                                 use_sim_time_arg,
                                 wheel_radius_arg,
@@ -55,6 +43,5 @@ def generate_launch_description():
                             max_angular_velocity_arg,
                               joystick_node,
                               waregv_controller,
-                              imu_chasis_node,
-                              motor_controller_node
+                
                              ])

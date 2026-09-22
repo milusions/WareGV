@@ -197,14 +197,14 @@ def generate_launch_description():
             wheel_base_arg,
             map_name_arg,
             waregv_description,
+            rosbridge_node,
+            foxglove_bridge,
             waregv_hardware,
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
             # waregv_mapping,
             # waregv_navigation,
-            rosbridge_node,
-            foxglove_bridge,
             # waregv_dashboard,
         ]
     )

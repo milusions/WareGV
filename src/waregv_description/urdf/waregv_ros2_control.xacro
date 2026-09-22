@@ -4,15 +4,15 @@
 
     <ros2_control name="WareGVSystem" type="system">
         <hardware>
-            <xacro:if value="$(arg sim_mode)">
+           
                 <plugin>gz_ros2_control/GazeboSimSystem</plugin>
-            </xacro:if>
-            <xacro:unless value="$(arg sim_mode)">
+       
+            <!-- <xacro:unless value="$(arg sim_mode)">
                 <plugin>waregv_hardware/STS3215ServoControlDriver</plugin>
                 <param name="port_left">/dev/ttyAMA3</param>
                 <param name="port_right">/dev/ttyAMA5</param>
                 <param name="baud_rate">1000000</param>
-            </xacro:unless>
+            </xacro:unless> -->
         </hardware>
         <joint name="wheel_front_right_joint">
             <command_interface name="velocity">

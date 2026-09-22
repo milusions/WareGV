@@ -17,14 +17,9 @@ from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 
 def generate_launch_description():
     waregv_bringup_dir = get_package_share_directory("waregv_bringup")
+    
     rosbridge_dir = get_package_share_directory("rosbridge_server")
-
-    mapping_enable_arg = DeclareLaunchArgument(
-        name="mapping_enable", default_value="true"
-    )
-    navigation_enable_arg = DeclareLaunchArgument(
-        name="navigation_enable", default_value="true"
-    )
+   
     world_name_arg = DeclareLaunchArgument(
         "world_name", default_value="small_warehouse"
     )
@@ -44,9 +39,6 @@ def generate_launch_description():
         name="model", default_value="waregv.urdf.xacro"
     )
     robot_spawn_z_arg = DeclareLaunchArgument(name="spawn_z", default_value="0.5")
-    map_name_arg = DeclareLaunchArgument(
-        name="map_name", default_value="small_warehouse"
-    )
 
     max_linear_velocity_conf = LaunchConfiguration("max_linear_velocity")
     max_angular_velocity_conf = LaunchConfiguration("max_angular_velocity")
@@ -136,19 +128,36 @@ def generate_launch_description():
     twist_mux_node_config_filepath = os.path.join(
         waregv_bringup_dir, "config", "twist_mux.yaml"
     )
+    
     twist_mux_node = Node(
         package="twist_mux",
         executable="twist_mux",
         name="twist_mux",
         parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
-        remappings=[("/cmd_vel_out", "/cmd_vel")],
+        remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
     )
 
+    
+    waregv_odometry_launch_file_path = os.path.join(
+            get_package_share_directory("waregv_odometry"),
+            "launch",
+            "odometry.launch.py",
+        )
+    waregv_odometry = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
+            launch_arguments={
+                "use_sim_time": use_sim_time,
+               
+                "wheel_radius": wheel_radius_conf,
+         
+            }.items(),
+        )
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
         "launch",
         "controller.launch.py",
     )
+    
     waregv_controller = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(waregv_controller_launch_file_path),
         launch_arguments={
@@ -193,22 +202,9 @@ def generate_launch_description():
         forwarding=True,
     )
 
-    waregv_dashboard_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_dashboard"),
-        "launch",
-        "dashboard.launch.py",
-    )
-    waregv_dashboard = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_dashboard_launch_file_path),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
-    )
-
     return LaunchDescription(
         [
-            mapping_enable_arg,
             robot_spawn_z_arg,
-            navigation_enable_arg,
-            map_name_arg,
             world_name_arg,
             max_linear_velocity_arg,
             max_angular_velocity_arg,
@@ -216,13 +212,13 @@ def generate_launch_description():
             wheel_base_arg,
             model_arg,
             waregv_urdf,
+            rosbridge_node,
+            foxglove_bridge,
             gazebo_sim,
             gz_spawn_entity,
             controller_spawners,
             twist_mux_node,
+            waregv_odometry,
             waregv_controller,
-            rosbridge_node,
-            foxglove_bridge,
-            waregv_dashboard,
         ]
     )

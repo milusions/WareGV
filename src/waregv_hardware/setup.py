@@ -2,7 +2,7 @@ import os
 from glob import glob
 from setuptools import find_packages, setup
 
-package_name = 'waregv_odometry'
+package_name = 'waregv_hardware'
 
 
 def package_files(directory):
@@ -22,7 +22,7 @@ for folder in ['launch']:
     for file_path in package_files(folder):
         install_dir = os.path.join('share', package_name, os.path.dirname(file_path))
         data_files.append((install_dir, [file_path]))
-
+        
 setup(
     name=package_name,
     version='0.0.0',
@@ -30,8 +30,8 @@ setup(
     data_files=data_files,
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='random',
-    maintainer_email='random@gmail.com',
+    maintainer='milon',
+    maintainer_email='milonpauljs@gmail.com',
     description='TODO: Package description',
     license='TODO: License declaration',
     extras_require={
@@ -41,7 +41,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "odometry=waregv_odometry.fused_odometry_node:main"
+              "imu_chasis_relay=waregv_hardware.imu_chasis_relay:main",
+                                                       "motor_system=waregv_hardware.motor_system:main"
         ],
     },
 )
