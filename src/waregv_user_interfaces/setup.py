@@ -4,24 +4,6 @@ from setuptools import find_packages, setup
 
 package_name = 'waregv_user_interfaces'
 
-def package_files(directory):
-    paths = []
-    for (path, directories, filenames) in os.walk(directory):
-        for filename in filenames:
-            paths.append(os.path.join(path, filename))
-    return paths
-
-
-data_files = [
-    ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
-    ('share/' + package_name, ['package.xml']),
-]
-
-for folder in ['launch','config']:
-    for file_path in package_files(folder):
-        install_dir = os.path.join('share', package_name, os.path.dirname(file_path))
-        data_files.append((install_dir, [file_path]))
-     
 setup(
     name=package_name,
     version='0.0.0',
@@ -30,20 +12,24 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # Include all launch files
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        # Include config files if needed
+        (os.path.join('share', package_name, 'config'), glob('config/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='milon',
-    maintainer_email='milonpauljs@gmail.com',
-    description='TODO: Package description',
+    maintainer_email='milon@todo.todo',
+    description='User interface nodes for WareGV',
     license='TODO: License declaration',
-    extras_require={
-        'test': [
-            'pytest',
-        ],
-    },
+    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'headlight_node = waregv_user_interfaces.headlight_node:main',
+            'nav2_status_node = waregv_user_interfaces.nav2_status_node:main',
+            'sensor_health_node = waregv_user_interfaces.sensor_health_node:main',
+            'tts_node = waregv_user_interfaces.tts_node:main',
         ],
     },
 )
