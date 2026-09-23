@@ -18,7 +18,7 @@ data_files = [
     ('share/' + package_name, ['package.xml']),
 ]
 
-for folder in ['launch']:
+for folder in ['launch',"config"]:
     for file_path in package_files(folder):
         install_dir = os.path.join('share', package_name, os.path.dirname(file_path))
         data_files.append((install_dir, [file_path]))
@@ -41,7 +41,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "odometry=waregv_odometry.fused_odometry_node:main"
+            "odometry=waregv_odometry.wheel_odometry:main"
         ],
     },
 )
