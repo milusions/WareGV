@@ -1,11 +1,27 @@
-# Hardware definitions
-ports:
-  - "/dev/ttyAMA3"
-  - "/dev/ttyAMA5"
+# waregv_hardware / config / motor_system_config.yaml
+#
+# Limits used by motor_system.py to build a jerk-limited (S-curve) speed
+# profile, an inertia-compensation "brake pulse" on sudden stops/reversals,
+# and a filter for incoming velocity commands before sending them to the
+# servos.
 
-servo_ids: [1, 2] 
+motor_limits:
+  max_velocity: 9.0          # rad/s, applied to linear-style speed inputs
+  min_velocity: -9.0
+  max_angular_velocity: 9.0  # rad/s, kept separate in case you clip angular commands differently upstream
+  min_angular_velocity: -9.0
+  max_acceleration: 60.0     # rad/s^2 -- 0->9 rad/s in ~0.15s, near-instant
+  min_acceleration: -60.0
+  max_jerk: 400.0            # rad/s^3 -- accel itself reaches its limit almost immediately
+  min_jerk: -400.0
 
-# Operational configurations
-steps_per_rev: 4096
-sample_rate_hz: 10
-log_filename: "motor_system.log"
+filter:
+  moving_average_window: 1   # 1 = no averaging at all; profile output passed straight through
+  update_rate_hz: 100.0      # control loop steps this often; lower per-tick lag
+
+brake_compensation:
+  enabled: true              # PX4-style momentum cancellation on sudden target changes
+  trigger_rate_threshold: 15.0   # rad/s^2 -- how fast the *commanded target* must change to count as "sudden"
+  min_velocity_to_trigger: 1.0   # rad/s -- don't bother braking if we were barely moving
+  gain: 0.3                      # fraction of pre-change velocity used as the reverse counter-pulse magnitude
+  duration: 0.15                 # seconds the pulse lasts, linearly decaying to zero
