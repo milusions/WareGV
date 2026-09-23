@@ -7,8 +7,8 @@ from launch.substitutions.launch_configuration import LaunchConfiguration
 
 def generate_launch_description():
     
-    max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.5")
-    max_angular_velocity_arg = DeclareLaunchArgument(name="max_angular_velocity", default_value=str(np.pi))
+    max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.11")
+    max_angular_velocity_arg = DeclareLaunchArgument(name="max_angular_velocity", default_value=str(0.35))
     wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value='0.036')
     track_width_arg = DeclareLaunchArgument(name="track_width", default_value='0.192')
     

@@ -24,10 +24,10 @@ def generate_launch_description():
         "world_name", default_value="small_warehouse"
     )
     max_linear_velocity_arg = DeclareLaunchArgument(
-        name="max_linear_velocity", default_value="0.1"
+        name="max_linear_velocity", default_value="0.11"
     )
     max_angular_velocity_arg = DeclareLaunchArgument(
-        name="max_angular_velocity", default_value=str(np.pi / 4)
+        name="max_angular_velocity", default_value=str(0.35)
     )
     wheel_radius_arg = DeclareLaunchArgument(
         name="wheel_radius", default_value="0.036"
