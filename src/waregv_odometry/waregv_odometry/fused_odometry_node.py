@@ -22,7 +22,8 @@ class FusedOdometryNode(Node):
         self.tracker = OdometryTracker()
         
         # Keep track of time so we know how long it's been between sensor updates (dt)
-        self.last_time = self.get_clock().now().nanoseconds / 1e9
+        # FIX 1: Do not initialize time on boot. Wait for actual sensor data.
+        self.last_time = None 
         
         # We'll store the latest IMU reading here so it's ready when the wheels report in
         self.latest_imu_yaw_rate = 0.0
@@ -74,9 +75,21 @@ class FusedOdometryNode(Node):
 
         # Figure out exactly how much time has passed since the last time this function ran.
         current_time = self.get_clock().now().nanoseconds / 1e9
+        
+        # FIX 2: Initialize time precisely when the first valid wheel data arrives
+        if self.last_time is None:
+            self.last_time = current_time
+            return
+            
         dt = current_time - self.last_time
         self.last_time = current_time
         
+        # FIX 3: Reject mathematically dangerous time gaps.
+        # If the robot stalls, topic lags, or wakes from idle, skip this integration step.
+        if dt > 0.5:
+            self.get_logger().warn(f'Large time gap of {dt:.2f}s detected. Skipping to prevent odometry jumps.')
+            return
+
         # If no time passed (or time went backwards in simulation), just bail out to avoid dividing by zero.
         if dt <= 0:
             return
