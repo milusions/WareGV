@@ -132,7 +132,8 @@ class MotorSystemNode(Node):
 
         # Convert raw step positions (0-4095 per revolution) to radians
         positions = [p * (2.0 * math.pi) / 4096 for p in positions_steps]
-
+        velocities[1] = velocities[1]*-1
+        velocities[3] = velocities[3]*-1 
         self.get_logger().info(
             f"[FEEDBACK RAD/S] FL: {velocities[0]:.2f} | FR: {velocities[1]:.2f} | RL: {velocities[2]:.2f} | RR: {velocities[3]:.2f}"
         )

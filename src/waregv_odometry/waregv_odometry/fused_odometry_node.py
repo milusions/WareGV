@@ -6,6 +6,7 @@ from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from tf_transformations import quaternion_from_euler
 from tf2_ros import TransformBroadcaster
+from rclpy.qos import qos_profile_sensor_data
 
 # Bring in our math logic from the other file
 from waregv_odometry.odometry_tracker import OdometryTracker
@@ -43,8 +44,10 @@ class FusedOdometryNode(Node):
         self.joint_state_sub = self.create_subscription(
             JointState, '/joint_states', self.joint_state_callback, 10
         )
+        
+        # Updated: Uses standard sensor QoS and corrected spelling to guarantee connection
         self.imu_sub = self.create_subscription(
-            Imu, '/imu_chasis', self.imu_callback, 10
+            Imu, '/imu_chassis', self.imu_callback, qos_profile_sensor_data
         )
         
         # Just a friendly message so we know it didn't crash on startup
