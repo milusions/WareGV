@@ -31,7 +31,7 @@ class IntegratedSensorHealthNode(Node):
             self.get_logger().warn("gpiozero unavailable. Running in software simulation mode.")
 
         # --- Sensor Tracking Dictionary ---
-        # Possible Sensor States: 'OK', 'INITIALIZING', 'TIMEOUT', 'CORRUPT', 'DEGRADED'
+        # States: 'OK', 'INITIALIZING', 'TIMEOUT', 'CORRUPT', 'DEGRADED'
         self.sensors = {
             'imu': {'last_time': None, 'state': 'INITIALIZING', 'detail': 'Awaiting data'},
             'lidar': {'last_time': None, 'state': 'INITIALIZING', 'detail': 'Awaiting data'},
@@ -51,7 +51,7 @@ class IntegratedSensorHealthNode(Node):
         # Set initial visual state
         self.apply_led_pattern('INITIALIZING')
 
-    def _get_now_sec(() -> float:
+    def _get_now_sec(self) -> float:
         return self.get_clock().now().nanoseconds / 1e9
 
     # 1. IMU Callback

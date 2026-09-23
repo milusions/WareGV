@@ -52,6 +52,8 @@ class WheelOdometryNode(Node):
         self.declare_parameter('right_sign', 1.0)
         self.declare_parameter('yaw_rate_source', 'gyro')  # 'gyro' | 'orientation'
         self.declare_parameter('gyro_bias_z', 0.0)
+        # Multiplies the bias-corrected gyro rate. Calibrate: scale = true_angle / measured_angle
+        self.declare_parameter('gyro_scale', 1.0)
         self.declare_parameter('max_yaw_rate', 1.5)
         self.declare_parameter('max_yaw_rate_jump', 0.8)
         self.declare_parameter('max_consecutive_rejects', 5)
@@ -69,6 +71,7 @@ class WheelOdometryNode(Node):
         self.rs = float(gp('right_sign'))
         self.source = str(gp('yaw_rate_source'))
         self.bias = float(gp('gyro_bias_z'))
+        self.gyro_scale = float(gp('gyro_scale'))
         self.max_rate = float(gp('max_yaw_rate'))
         self.max_jump = float(gp('max_yaw_rate_jump'))
         self.max_rej = int(gp('max_consecutive_rejects'))
@@ -187,7 +190,7 @@ class WheelOdometryNode(Node):
             raw = msg.angular_velocity.z
             if not math.isfinite(raw):
                 return
-            rate = raw - self.bias
+            rate = (raw - self.bias) * self.gyro_scale
             raw_for_bias = raw
 
         bad = abs(rate) > self.max_rate or abs(rate - self.last_good_rate) > self.max_jump
