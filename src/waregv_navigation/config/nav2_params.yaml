@@ -44,14 +44,14 @@ controller_server:
       min_linear_vel: 0.0
       max_angular_vel: 0.35
       desired_linear_vel: 0.11
-      max_angular_accel: 32.0
+      max_angular_accel: 3.2
       lookahead_dist: 0.25           
       min_lookahead_dist: 0.15       
       max_lookahead_dist: 0.5        
       lookahead_time: 0.8            
       use_rotate_to_heading: true
-      allow_reversing: true
-      rotate_to_heading_min_angle: 0.02
+      allow_reversing: false         # Changed to false to force rotation instead of moving backward
+      rotate_to_heading_min_angle: 0.5 # Adjusted to ~28 degrees to ensure initial rotation alignment without transit jitter
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
       regulated_linear_scaling_min_radius: 0.9
@@ -72,12 +72,12 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      robot_radius: 0.25
+      robot_radius: 0.22
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.50
+        inflation_radius: 0.55
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -110,7 +110,7 @@ global_costmap:
       publish_frequency: 5.0
       global_frame: map
       robot_base_frame: base_footprint
-      robot_radius: 0.25
+      robot_radius: 0.22
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
