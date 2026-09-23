@@ -33,4 +33,4 @@ ekf_filter_node:
     imu0_queue_size: 20
     imu0_differential: false
     imu0_remove_gravitational_acceleration: false
-    imu0_twist_rejection_threshold: 6.0   # Mahalanobis gate on top of the node's filter
+    imu0_twist_rejection_threshold: 6.0

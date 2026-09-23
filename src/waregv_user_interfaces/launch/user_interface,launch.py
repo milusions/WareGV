@@ -8,15 +8,12 @@ from waregv_ws.src.waregv_user_interfaces import waregv_user_interfaces
 
 def generate_launch_description():
     
-    
     waregv_user_interfaces = Node(
         package="waregv_user_interfaces",
         executable="odometry",
-             parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "wheel_radius":LaunchConfiguration('wheel_radius')}],
+             parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), }],
         output="screen",
     )
-    
-
 
     return LaunchDescription([
  

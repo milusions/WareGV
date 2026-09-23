@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sensor preprocessor for robot_localization EKF.
+Sensor preprocessor for the robot_localization EKF.
 
 Inputs
   /joint_states  (velocity[] = [FL, FR, RL, RR], rad/s)
@@ -14,6 +14,7 @@ This node does NOT integrate pose and does NOT publish TF.
 The EKF (ekf_node) integrates and publishes odom -> base_footprint.
 """
 import math
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -26,23 +27,23 @@ class WheelOdometryNode(Node):
         super().__init__('wheel_odometry')
 
         self.declare_parameter('wheel_radius', 0.036)
-        # EFFECTIVE track width for a skid-steer robot. Usually larger than the
-        # geometric width (scrubbing). Calibrate: spin 10 turns, compare.
+        # EFFECTIVE track width for a skid-steer robot (usually larger than the
+        # geometric width because of scrubbing). Calibrate with a 10-turn spin.
         self.declare_parameter('wheel_separation', 0.30)
         self.declare_parameter('left_sign', 1.0)
         self.declare_parameter('right_sign', 1.0)
-        self.declare_parameter('gyro_bias_z', 0.0)          # initial bias
+        self.declare_parameter('gyro_bias_z', 0.0)          # initial bias (rad/s)
         self.declare_parameter('max_yaw_rate', 1.5)         # rad/s physical limit
         self.declare_parameter('max_yaw_rate_jump', 0.8)    # rad/s between samples
         self.declare_parameter('max_consecutive_rejects', 5)
         self.declare_parameter('auto_bias', True)
         self.declare_parameter('imu_output_frame', 'base_footprint')
-        # variances (rad/s)^2 and (m/s)^2
+        # variances: (rad/s)^2 and (m/s)^2
         self.declare_parameter('gyro_var', 1e-4)
         self.declare_parameter('wheel_vx_var', 4e-4)
         self.declare_parameter('wheel_wz_var', 5e-2)        # skid steer: trust little
 
-        self.bias = self.get_parameter('gyro_bias_z').value
+        self.bias = float(self.get_parameter('gyro_bias_z').value)
         self.last_good_rate = 0.0
         self.reject_count = 0
         self.stationary_since = None
@@ -74,13 +75,19 @@ class WheelOdometryNode(Node):
         wz = (v_r - v_l) / sep
         self.wheel_lin, self.wheel_ang = vx, wz
 
+        # Use the joint-state stamp when valid so the EKF applies the
+        # measurement at the right time; fall back to node clock otherwise.
+        stamp = msg.header.stamp
+        if stamp.sec == 0 and stamp.nanosec == 0:
+            stamp = self.get_clock().now().to_msg()
+
         odom = Odometry()
-        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.stamp = stamp
         odom.header.frame_id = 'odom'
         odom.child_frame_id = 'base_footprint'
         odom.twist.twist.linear.x = vx
         odom.twist.twist.angular.z = wz
-        # Pose is not used by the EKF config; mark as unknown.
+        # Pose is not fused by the EKF config; mark as unknown.
         for i in (0, 7, 14, 21, 28, 35):
             odom.pose.covariance[i] = 1e6
         tc = odom.twist.covariance
@@ -110,7 +117,7 @@ class WheelOdometryNode(Node):
             self.get_logger().warn(
                 f'Gyro spike rejected: {rate:.2f} rad/s (last good {self.last_good_rate:.2f})',
                 throttle_duration_sec=1.0)
-            rate = self.last_good_rate          # hold, do not integrate garbage
+            rate = self.last_good_rate          # hold, never integrate garbage
         else:
             self.reject_count = 0
             self.last_good_rate = rate

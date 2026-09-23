@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+"""Debug only: publishes unwrapped yaw (degrees) from the EKF's /odom on /odom_euler."""
 import math
+
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
@@ -16,14 +18,14 @@ class OdomEuler(Node):
 
     def cb(self, msg: Odometry):
         q = msg.pose.pose.orientation
-        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
-                         1 - 2 * (q.y * q.y + q.z * q.z))
-        if self.last_yaw is not None:
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        if self.last_yaw is None:
+            self.yaw_unwrapped = yaw
+        else:
             d = math.atan2(math.sin(yaw - self.last_yaw),
                            math.cos(yaw - self.last_yaw))
             self.yaw_unwrapped += d
-        else:
-            self.yaw_unwrapped = yaw
         self.last_yaw = yaw
 
         out = Vector3()
@@ -31,8 +33,8 @@ class OdomEuler(Node):
         self.pub.publish(out)
 
 
-def main():
-    rclpy.init()
+def main(args=None):
+    rclpy.init(args=args)
     node = OdomEuler()
     try:
         rclpy.spin(node)
