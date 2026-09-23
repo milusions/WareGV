@@ -47,10 +47,9 @@ class OdometryTracker:
         # Finally, update our actual heading with the full turn amount.
         self.theta += delta_theta
         
-        # We need to keep theta between -180 and +180 degrees (-pi to pi).
-        # If the robot spins in circles all day, we don't want the angle to grow to a million.
-        # atan2(sin, cos) is just a math shortcut that instantly forces the angle back into that range.
-        self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))
+        # FIX: Removed the atan2 normalization. 
+        # The angle will now grow continuously beyond 180 and -180 degrees, 
+        # preventing the visual jump on your plot.
         
         # Send the calculated speeds back to the ROS node so it can broadcast them.
         return linear_velocity, angular_velocity
