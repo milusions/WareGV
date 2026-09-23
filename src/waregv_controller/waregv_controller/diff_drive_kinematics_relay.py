@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
+import math
 
 class DiffDriveKinematicsRelay(Node):
     def __init__(self):
@@ -40,13 +41,27 @@ class DiffDriveKinematicsRelay(Node):
                         '/velocity_controller/commands',
                         10
                     )
-
+        self.declare_parameter('max_linear_vel', 0.11)
+        self.declare_parameter('max_angular_vel',0.35)
+         
+           
+           
         self.get_logger().info("Diff Drive Kinematics Relay Node has started.")
 
     def cmd_vel_callback(self, msg: Twist):
+        max_lin = self.get_parameter('max_linear_vel').value
+        max_ang = self.get_parameter('max_angular_vel').value
+        
         # Extract linear velocity (x) and angular velocity (z, anticlockwise positive)
         v = msg.linear.x
+        if(math.abs(v)> max_lin):
+            v = (v/math.abs(v))*max_lin
+            
+            
         omega = msg.angular.z
+        
+        if(math.abs(omega)> max_ang):
+                    omega = (omega/math.abs(omega))*max_ang
 
         # 4-Wheel Differential Drive Inverse Kinematics:
         # Left and right side linear velocities (v = v_linear +/- (omega * track_width / 2))

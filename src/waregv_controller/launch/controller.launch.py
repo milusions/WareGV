@@ -22,7 +22,7 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': LaunchConfiguration("use_sim_time"),
                 'dev': '/dev/input/js0',
-                'deadzone': 0.05,
+                'deadzone': 0.01,
                 'autorepeat_rate': 20.0
             }]
         )
@@ -37,7 +37,7 @@ def generate_launch_description():
     diff_drive_kinematics_relay_node = Node(
             package="waregv_controller",
             executable="diff_drive_kinematics_relay",
-             parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "wheel_R":LaunchConfiguration('wheel_radius'), "track_width":LaunchConfiguration('track_width')}],
+             parameters=[{'use_sim_time': LaunchConfiguration("use_sim_time"), "wheel_radius":LaunchConfiguration('wheel_radius'), "track_width":LaunchConfiguration('track_width'),"max_linear_vel":LaunchConfiguration('max_linear_velocity'), "max_angular_vel":LaunchConfiguration('max_angular_velocity')}],
             output="screen",
         )
         
