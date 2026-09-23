@@ -54,14 +54,14 @@ class DiffDriveKinematicsRelay(Node):
         
         # Extract linear velocity (x) and angular velocity (z, anticlockwise positive)
         v = msg.linear.x
-        if(math.abs(v)> max_lin):
-            v = (v/math.abs(v))*max_lin
+        if(math.fabs(v)> max_lin):
+            v = (v/math.fabs(v))*max_lin
             
             
         omega = msg.angular.z
         
-        if(math.abs(omega)> max_ang):
-                    omega = (omega/math.abs(omega))*max_ang
+        if(math.fabs(omega)> max_ang):
+                    omega = (omega/math.fabs(omega))*max_ang
 
         # 4-Wheel Differential Drive Inverse Kinematics:
         # Left and right side linear velocities (v = v_linear +/- (omega * track_width / 2))
