@@ -61,5 +61,5 @@ def generate_launch_description():
         use_sim_time_arg,  
         ydlidar_node,
         imu_chasis_relay_node,
-        # motor_system_node
+        motor_system_node
     ])
