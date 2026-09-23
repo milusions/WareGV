@@ -8,20 +8,27 @@ Inputs
 
 Outputs
   /wheel/odom    nav_msgs/Odometry  - TWIST ONLY (vx, wz from inverse kinematics)
-  /imu/filtered  sensor_msgs/Imu    - yaw rate only, spike-rejected, bias-removed,
-                                      averaged down to imu_output_rate_hz
-  /yaw_debug     geometry_msgs/Vector3 - three independently integrated yaw angles
-                 in DEGREES (unwrapped, zeroed at start):
-                     x = yaw from the rate fed to the EKF
-                     y = yaw from IMU orientation quaternion
-                     z = yaw from wheel inverse kinematics
+  /imu/filtered  sensor_msgs/Imu    - yaw rate only, arbitrated, averaged to imu_output_rate_hz
+  /yaw_debug     geometry_msgs/Vector3 (degrees, unwrapped, zeroed at start)
+                     x = integral of the rate fed to the EKF
+                     y = IMU orientation yaw
+                     z = wheel yaw
 
-yaw_rate_source:
-  'gyro'        use msg.angular_velocity.z   (default)
-  'orientation' derivative of IMU orientation yaw, wrap-safe
+Yaw-rate arbitration (gyro source)
+  1. Take bias-corrected, scaled gyro rate g.
+  2. Reject g only if it is physically impossible:
+        |g| > max_yaw_rate                           (default 8 rad/s)
+        |g - last_good| > max(min_jump, max_accel*dt) (wrap spikes are ~2*pi/dt)
+     Genuine fast spins (joystick 2-3 rad/s) pass untouched.
+  3. A rejected sample is REPLACED by the wrap-safe IMU-orientation rate
+     (smoothed), so no rotation is lost at a wrap. If orientation is missing,
+     the last good rate is held.
+  4. Every diag_window seconds, gyro-integrated yaw gain is compared with
+     orientation yaw gain; a mismatch is logged WITH the heading, which shows
+     whether errors cluster at a particular angle (e.g. +-180 deg).
 
 No pose integration and no TF here: the EKF owns odom -> base_footprint.
-Parameters are read once at startup (restart the node to change them).
+Parameters are read once at startup.
 """
 import math
 
@@ -52,11 +59,12 @@ class WheelOdometryNode(Node):
         self.declare_parameter('right_sign', 1.0)
         self.declare_parameter('yaw_rate_source', 'gyro')  # 'gyro' | 'orientation'
         self.declare_parameter('gyro_bias_z', 0.0)
-        # Multiplies the bias-corrected gyro rate. Calibrate: scale = true_angle / measured_angle
-        self.declare_parameter('gyro_scale', 1.0)
-        self.declare_parameter('max_yaw_rate', 1.5)
-        self.declare_parameter('max_yaw_rate_jump', 0.8)
-        self.declare_parameter('max_consecutive_rejects', 5)
+        self.declare_parameter('gyro_scale', 1.0)          # true_angle / measured_angle
+        self.declare_parameter('max_yaw_rate', 8.0)        # rad/s, physical impossibility limit
+        self.declare_parameter('max_yaw_accel', 80.0)      # rad/s^2
+        self.declare_parameter('min_jump', 0.5)            # rad/s floor for the jump gate
+        self.declare_parameter('diag_window', 1.0)         # s
+        self.declare_parameter('diag_thresh_deg', 2.0)     # deg mismatch per window
         self.declare_parameter('auto_bias', True)
         self.declare_parameter('imu_output_frame', 'base_footprint')
         self.declare_parameter('imu_output_rate_hz', 50.0)
@@ -73,8 +81,10 @@ class WheelOdometryNode(Node):
         self.bias = float(gp('gyro_bias_z'))
         self.gyro_scale = float(gp('gyro_scale'))
         self.max_rate = float(gp('max_yaw_rate'))
-        self.max_jump = float(gp('max_yaw_rate_jump'))
-        self.max_rej = int(gp('max_consecutive_rejects'))
+        self.max_accel = float(gp('max_yaw_accel'))
+        self.min_jump = float(gp('min_jump'))
+        self.diag_window = float(gp('diag_window'))
+        self.diag_thresh = math.radians(float(gp('diag_thresh_deg')))
         self.auto_bias = bool(gp('auto_bias'))
         self.imu_frame = str(gp('imu_output_frame'))
         hz = float(gp('imu_output_rate_hz'))
@@ -84,21 +94,26 @@ class WheelOdometryNode(Node):
         self.wz_var = float(gp('wheel_wz_var'))
 
         self.last_good_rate = 0.0
-        self.reject_count = 0
+        self.orient_rate_ema = 0.0
+        self.have_orient_rate = False
         self.stationary_since = None
         self.wheel_lin = 0.0
         self.wheel_ang = 0.0
+        self.substituted = 0            # count of arbitrated samples
 
         self.last_imu_t = None
         self.last_joint_t = None
-
-        self.acc_rate_dt = 0.0     # for averaging down to imu_output_rate_hz
+        self.acc_rate_dt = 0.0
         self.acc_dt = 0.0
 
         self.yaw_rate_int = 0.0
         self.yaw_orient = 0.0
         self.yaw_wheel = 0.0
         self.last_orient_yaw = None
+
+        self.diag_t0 = None
+        self.diag_gyro0 = 0.0
+        self.diag_orient0 = 0.0
 
         self.wheel_pub = self.create_publisher(Odometry, '/wheel/odom', 10)
         self.imu_pub = self.create_publisher(Imu, '/imu/filtered', qos_profile_sensor_data)
@@ -107,7 +122,8 @@ class WheelOdometryNode(Node):
         self.create_subscription(Imu, '/imu_chassis', self.imu_cb, qos_profile_sensor_data)
 
         self.get_logger().info(
-            f'wheel_odometry started: source={self.source}, imu out {hz:.0f} Hz')
+            f'wheel_odometry started: source={self.source}, scale={self.gyro_scale}, '
+            f'imu out {hz:.0f} Hz')
 
     # ---------- helpers ----------
     def _stamp_sec(self, stamp) -> float:
@@ -167,7 +183,9 @@ class WheelOdometryNode(Node):
         dt = None if self.last_imu_t is None else t - self.last_imu_t
         self.last_imu_t = t
         dt_ok = self._valid_dt(dt)
+        dt_eff = dt if dt_ok else 0.01
 
+        # ---- wrap-safe orientation yaw and rate ----
         orient_rate = None
         q = msg.orientation
         has_q = (msg.orientation_covariance[0] != -1.0 and
@@ -179,37 +197,52 @@ class WheelOdometryNode(Node):
                 self.yaw_orient += d
                 if dt_ok:
                     orient_rate = d / dt
+                    if abs(orient_rate) < self.max_rate:
+                        self.orient_rate_ema += 0.2 * (orient_rate - self.orient_rate_ema)
+                        self.have_orient_rate = True
             self.last_orient_yaw = yaw
 
+        # ---- choose the yaw rate ----
+        raw_for_bias = None
         if self.source == 'orientation':
             if orient_rate is None:
                 return
             rate = orient_rate
-            raw_for_bias = None
+            self.last_good_rate = rate
         else:
             raw = msg.angular_velocity.z
             if not math.isfinite(raw):
                 return
-            rate = (raw - self.bias) * self.gyro_scale
-            raw_for_bias = raw
+            g = (raw - self.bias) * self.gyro_scale
 
-        bad = abs(rate) > self.max_rate or abs(rate - self.last_good_rate) > self.max_jump
-        if bad and self.reject_count < self.max_rej:
-            self.reject_count += 1
-            self.get_logger().warn(
-                f'Yaw-rate spike rejected: {rate:.2f} rad/s (last good {self.last_good_rate:.2f})',
-                throttle_duration_sec=1.0)
-            rate = self.last_good_rate
-        else:
-            self.reject_count = 0
-            self.last_good_rate = rate
-            if raw_for_bias is not None:
-                self._update_bias(raw_for_bias)
+            allowed_jump = max(self.min_jump, self.max_accel * dt_eff)
+            bad = abs(g) > self.max_rate or abs(g - self.last_good_rate) > allowed_jump
+            if bad:
+                self.substituted += 1
+                if self.have_orient_rate:
+                    rate = self.orient_rate_ema          # wrap-safe replacement
+                else:
+                    rate = self.last_good_rate           # last resort: hold
+                heading = math.degrees(self.yaw_orient) % 360.0
+                self.get_logger().warn(
+                    f'Gyro sample rejected (g={g:.2f} rad/s, last={self.last_good_rate:.2f}, '
+                    f'orient={self.orient_rate_ema:.2f}) at heading {heading:.0f} deg '
+                    f'[total {self.substituted}]',
+                    throttle_duration_sec=0.5)
+            else:
+                rate = g
+                self.last_good_rate = g
+                raw_for_bias = raw
+
+        if raw_for_bias is not None:
+            self._update_bias(raw_for_bias)
 
         if dt_ok:
             self.yaw_rate_int += rate * dt
-            self.acc_rate_dt += rate * dt     # average, not drop, so no rotation is lost
+            self.acc_rate_dt += rate * dt          # averaged, so nothing is dropped
             self.acc_dt += dt
+
+        self._consistency_check(t)
 
         if self.acc_dt <= 0.0 or self.acc_dt < self.out_period:
             return
@@ -233,6 +266,28 @@ class WheelOdometryNode(Node):
         dbg.y = math.degrees(self.yaw_orient)
         dbg.z = math.degrees(self.yaw_wheel)
         self.debug_pub.publish(dbg)
+
+    def _consistency_check(self, t: float):
+        """Compare yaw gained (gyro path vs orientation) over a window; log heading on mismatch."""
+        if self.source != 'gyro' or not self.have_orient_rate:
+            return
+        if self.diag_t0 is None:
+            self.diag_t0 = t
+            self.diag_gyro0 = self.yaw_rate_int
+            self.diag_orient0 = self.yaw_orient
+            return
+        if t - self.diag_t0 < self.diag_window:
+            return
+        d_gyro = self.yaw_rate_int - self.diag_gyro0
+        d_orient = self.yaw_orient - self.diag_orient0
+        if abs(d_gyro - d_orient) > self.diag_thresh:
+            heading = math.degrees(self.yaw_orient) % 360.0
+            self.get_logger().warn(
+                f'Yaw mismatch over {self.diag_window:.1f}s: gyro {math.degrees(d_gyro):.1f} deg '
+                f'vs orientation {math.degrees(d_orient):.1f} deg at heading {heading:.0f} deg')
+        self.diag_t0 = t
+        self.diag_gyro0 = self.yaw_rate_int
+        self.diag_orient0 = self.yaw_orient
 
     def _update_bias(self, raw_rate: float):
         if not self.auto_bias:
