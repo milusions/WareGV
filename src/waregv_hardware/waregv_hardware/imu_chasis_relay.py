@@ -10,7 +10,7 @@ import adafruit_bno055
 class IMUChasis(Node):
     def __init__(self):
         super().__init__('imu_node')
-        self.pub = self.create_publisher(Imu, '/imu/chasis', 10)
+        self.pub = self.create_publisher(Imu, '/imu_chassis', 10)
         
         # Initialize I2C Bus 1
         self.i2c = I2C(1)
