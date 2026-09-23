@@ -1,83 +1,17 @@
-# ==============================================================================
-# ROS 2 CONTROL & DIFFERENTIAL DRIVE CONTROLLER CONFIGURATION FILE
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# 1. CONTROLLER MANAGER
-# Registers active controllers, hardware interface loops, and execution rates.
-# ------------------------------------------------------------------------------
 controller_manager:
   ros__parameters:
-    update_rate: 50                   # Hardware write/read control loop update rate in Hz (50 Hz = 20 ms step)
+    update_rate: 50
 
-    # Broadcaster to read joint states from hardware and publish to /joint_states
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    # Main Differential Drive Controller
-    # FIXED: Changed from velocity_controllers/JointGroupVelocityController to diff_drive_controller/DiffDriveController
-    differential_drive_controller:
-      type: diff_drive_controller/DiffDriveController
+    velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
 
-
-# ------------------------------------------------------------------------------
-# 2. DIFFERENTIAL DRIVE CONTROLLER PARAMETERS
-# Kinematic modeling, odometry estimation, and velocity limits for differential drive.
-# ------------------------------------------------------------------------------
-differential_drive_controller:
+velocity_controller:
   ros__parameters:
-    # --- Joint Hardware Assignments ---
-    left_wheel_names: ["wheel_front_left_joint", "wheel_rear_left_joint"]   # Hardware joint names driving left side
-    right_wheel_names: ["wheel_front_right_joint", "wheel_rear_right_joint"] # Hardware joint names driving right side
-
-    # --- Physical Dimensions & Calibration Multipliers ---
-    wheel_separation: 0.192           # Distance between track centers of left and right wheels in meters
-    wheel_radius: 0.036               # Radius of driving wheels in meters
-
-    wheel_separation_multiplier: 1.0  # Calibration factor applied to wheel separation (used to fix turning odometry drift)
-    left_wheel_radius_multiplier: 1.0 # Calibration factor applied to left wheel radius (used to fix straight-line drift)
-    right_wheel_radius_multiplier: 1.0# Calibration factor applied to right wheel radius (used to fix straight-line drift)
-
-    # --- Frame & Coordinate Definitions ---
-    odom_frame_id: odom               # Odometry coordinate frame ID
-    base_frame_id: base_footprint     # Base frame ID attached to robot base
-
-    # --- Odometry Covariance Diagonals [x, y, z, roll, pitch, yaw] ---
-    pose_covariance_diagonal: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # Static noise variance assigned to estimated pose
-    twist_covariance_diagonal: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # Static noise variance assigned to estimated velocity
-
-    # --- Hardware Feedback & Execution Options ---
-    position_feedback: false          # Set true if hardware joints provide position feedback instead of velocity
-    open_loop: false                  # Set true to calculate odometry strictly from sent command velocities rather than hardware feedback
-    enable_odom_tf: false              # Set true to publish calculated dynamic transform from odom -> base_footprint
-
-    # --- Safety & Dynamic Filtering ---
-    cmd_vel_timeout: 0.5              # Time threshold in seconds; if no cmd_vel received within this period, wheels stop
-    publish_limited_velocity: true    # Publish actual velocity commands sent to hardware after applying limits to /cmd_vel_limited
-    velocity_rolling_window_size: 10  # Moving average window size for smoothing velocity measurement feedback
-
-    # --------------------------------------------------------------------------
-    # Dynamic Limits - Linear X Motion
-    # Setting values to .NAN disables that specific limit inside the controller.
-    # --------------------------------------------------------------------------
-    linear.x.max_velocity: .NAN                 # Max forward linear velocity limit (m/s)
-    linear.x.min_velocity: .NAN                 # Max reverse linear velocity limit (m/s)
-    linear.x.max_acceleration: .NAN             # Max forward acceleration limit (m/s^2)
-    linear.x.max_deceleration: .NAN             # Max forward braking deceleration limit (m/s^2)
-    linear.x.max_acceleration_reverse: .NAN     # Max reverse acceleration limit (m/s^2)
-    linear.x.max_deceleration_reverse: .NAN     # Max reverse braking deceleration limit (m/s^2)
-    linear.x.max_jerk: .NAN                     # Max jerk limit (change in acceleration over time, m/s^3)
-    linear.x.min_jerk: .NAN                     # Min jerk limit (m/s^3)
-
-    # --------------------------------------------------------------------------
-    # Dynamic Limits - Angular Z Motion
-    # Setting values to .NAN disables that specific limit inside the controller.
-    # --------------------------------------------------------------------------
-    angular.z.max_velocity: .NAN                # Max angular rotation velocity limit (rad/s)
-    angular.z.min_velocity: .NAN                # Max reverse angular rotation velocity limit (rad/s)
-    angular.z.max_acceleration: .NAN            # Max angular acceleration limit (rad/s^2)
-    angular.z.max_deceleration: .NAN            # Max angular braking deceleration limit (rad/s^2)
-    angular.z.max_acceleration_reverse: .NAN    # Max reverse angular acceleration limit (rad/s^2)
-    angular.z.max_deceleration_reverse: .NAN    # Max reverse angular braking deceleration limit (rad/s^2)
-    angular.z.max_jerk: .NAN                    # Max angular jerk limit (rad/s^3)
-    angular.z.min_jerk: .NAN                    # Min angular jerk limit (rad/s^3)
+    joints:
+      - wheel_front_left_joint
+      - wheel_front_right_joint
+      - wheel_rear_left_joint
+      - wheel_rear_right_joint

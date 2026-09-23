@@ -68,7 +68,7 @@ class JoystickController(Node):
 
         if self.use_sim_time:
             linear_cmd = msg.axes[1] * max_lin
-            angular_cmd = -1*msg.axes[3] * max_ang
+            angular_cmd = msg.axes[0] * max_ang
         else: 
             linear_cmd = msg.axes[1] * max_lin
             angular_cmd = msg.axes[0] * max_ang

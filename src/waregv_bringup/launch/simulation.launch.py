@@ -181,26 +181,27 @@ def generate_launch_description():
     )
 
     foxglove_bridge = GroupAction(
-        actions=[
-            IncludeLaunchDescription(
-                XMLLaunchDescriptionSource(
-                    PathJoinSubstitution(
-                        [
-                            FindPackageShare("foxglove_bridge"),
-                            "launch",
-                            "foxglove_bridge_launch.xml",
-                        ]
-                    )
-                ),
-                launch_arguments={
-                    "port": "8765",
-                    "topic_qos_overrides": json.dumps(qos_overrides),
-                }.items(),
-            )
-        ],
-        scoped=True,
-        forwarding=True,
-    )
+            actions=[
+                IncludeLaunchDescription(
+                    XMLLaunchDescriptionSource(
+                        PathJoinSubstitution(
+                            [
+                                FindPackageShare("foxglove_bridge"),
+                                "launch",
+                                "foxglove_bridge_launch.xml",
+                            ]
+                        )
+                    ),
+                    launch_arguments={
+                        "port": "8765",
+                        "address": "0.0.0.0",
+                        "topic_qos_overrides": json.dumps(qos_overrides),
+                    }.items(),
+                )
+            ],
+            scoped=True,
+            forwarding=True,
+        )
 
     return LaunchDescription(
         [

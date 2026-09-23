@@ -6,7 +6,10 @@ from std_msgs.msg import Float64MultiArray
 class DiffDriveKinematicsRelay(Node):
     def __init__(self):
         super().__init__('diff_drive_kinematics_relay')
+        if not self.has_parameter('use_sim_time'):
+            self.declare_parameter('use_sim_time', True)
 
+        self.use_sim_time = self.get_parameter('use_sim_time').value
         # Declare robot physical parameters for differential drive kinematics
         self.declare_parameter('track_width', 0.192)   # Distance between left and right wheels (meters)
         self.declare_parameter('wheel_radius', 0.036)  # Radius of the wheels (meters)
@@ -16,19 +19,27 @@ class DiffDriveKinematicsRelay(Node):
         self.wheel_radius = self.get_parameter('wheel_radius').value
 
         # Subscriber for un-stamped velocity commands
+      
         self.cmd_sub = self.create_subscription(
             Twist,
             '/cmd_vel_unstamped',
             self.cmd_vel_callback,
             10
-        )
+         )
 
         # Publisher for motor system command array [fl, fr, rl, rr]
-        self.motor_pub = self.create_publisher(
+        if not self.use_sim_time:   
+         self.motor_pub = self.create_publisher(
             Float64MultiArray,
             '/motor_system/commands',
             10
         )
+        else:
+            self.motor_pub = self.create_publisher(
+                        Float64MultiArray,
+                        '/velocity_controller/commands',
+                        10
+                    )
 
         self.get_logger().info("Diff Drive Kinematics Relay Node has started.")
 
