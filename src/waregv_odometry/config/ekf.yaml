@@ -1,10 +1,12 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 30.0
+    frequency: 20.0              # was 30; matches the Nav2 controller rate
+    sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
     predict_to_current_time: true
     transform_timeout: 0.1
+    print_diagnostics: false
 
     map_frame: map
     odom_frame: odom
@@ -23,14 +25,14 @@ ekf_filter_node:
     odom0_queue_size: 10
     odom0_differential: false
 
-    # Gyro: yaw rate only (no absolute yaw, so no wrap problem exists)
+    # Gyro: yaw rate only (already averaged to ~50 Hz by wheel_odometry)
     imu0: /imu/filtered
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
                   false, false, true,
                   false, false, false]
-    imu0_queue_size: 20
+    imu0_queue_size: 10
     imu0_differential: false
     imu0_remove_gravitational_acceleration: false
     imu0_twist_rejection_threshold: 6.0

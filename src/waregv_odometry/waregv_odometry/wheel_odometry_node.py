@@ -8,19 +8,20 @@ Inputs
 
 Outputs
   /wheel/odom    nav_msgs/Odometry  - TWIST ONLY (vx, wz from inverse kinematics)
-  /imu/filtered  sensor_msgs/Imu    - yaw rate only, spike-rejected, bias-removed
-  /yaw_debug     geometry_msgs/Vector3 - three independently integrated yaw
-                 angles in DEGREES (all unwrapped, all zeroed at start):
-                     x = yaw from the rate that is fed to the EKF
-                     y = yaw from IMU orientation quaternion (unwrapped)
+  /imu/filtered  sensor_msgs/Imu    - yaw rate only, spike-rejected, bias-removed,
+                                      averaged down to imu_output_rate_hz
+  /yaw_debug     geometry_msgs/Vector3 - three independently integrated yaw angles
+                 in DEGREES (unwrapped, zeroed at start):
+                     x = yaw from the rate fed to the EKF
+                     y = yaw from IMU orientation quaternion
                      z = yaw from wheel inverse kinematics
 
 yaw_rate_source:
-  'gyro'        use msg.angular_velocity.z            (default)
-  'orientation' use the derivative of the IMU orientation yaw, computed with
-                wrap-safe differencing (immune to 0..360 / +-180 wrapping)
+  'gyro'        use msg.angular_velocity.z   (default)
+  'orientation' derivative of IMU orientation yaw, wrap-safe
 
 No pose integration and no TF here: the EKF owns odom -> base_footprint.
+Parameters are read once at startup (restart the node to change them).
 """
 import math
 
@@ -46,36 +47,54 @@ class WheelOdometryNode(Node):
         super().__init__('wheel_odometry')
 
         self.declare_parameter('wheel_radius', 0.036)
-        # EFFECTIVE track width for skid steer (bigger than geometric width).
-        self.declare_parameter('wheel_separation', 0.30)
+        self.declare_parameter('wheel_separation', 0.30)   # EFFECTIVE track width; calibrate
         self.declare_parameter('left_sign', 1.0)
         self.declare_parameter('right_sign', 1.0)
-        self.declare_parameter('yaw_rate_source', 'gyro')   # 'gyro' | 'orientation'
+        self.declare_parameter('yaw_rate_source', 'gyro')  # 'gyro' | 'orientation'
         self.declare_parameter('gyro_bias_z', 0.0)
         self.declare_parameter('max_yaw_rate', 1.5)
         self.declare_parameter('max_yaw_rate_jump', 0.8)
         self.declare_parameter('max_consecutive_rejects', 5)
         self.declare_parameter('auto_bias', True)
         self.declare_parameter('imu_output_frame', 'base_footprint')
+        self.declare_parameter('imu_output_rate_hz', 50.0)
         self.declare_parameter('gyro_var', 1e-4)
         self.declare_parameter('wheel_vx_var', 4e-4)
         self.declare_parameter('wheel_wz_var', 5e-2)
 
-        self.bias = float(self.get_parameter('gyro_bias_z').value)
+        gp = lambda n: self.get_parameter(n).value
+        self.r = float(gp('wheel_radius'))
+        self.sep = float(gp('wheel_separation'))
+        self.ls = float(gp('left_sign'))
+        self.rs = float(gp('right_sign'))
+        self.source = str(gp('yaw_rate_source'))
+        self.bias = float(gp('gyro_bias_z'))
+        self.max_rate = float(gp('max_yaw_rate'))
+        self.max_jump = float(gp('max_yaw_rate_jump'))
+        self.max_rej = int(gp('max_consecutive_rejects'))
+        self.auto_bias = bool(gp('auto_bias'))
+        self.imu_frame = str(gp('imu_output_frame'))
+        hz = float(gp('imu_output_rate_hz'))
+        self.out_period = 1.0 / hz if hz > 0.0 else 0.0
+        self.gyro_var = float(gp('gyro_var'))
+        self.vx_var = float(gp('wheel_vx_var'))
+        self.wz_var = float(gp('wheel_wz_var'))
+
         self.last_good_rate = 0.0
         self.reject_count = 0
         self.stationary_since = None
         self.wheel_lin = 0.0
         self.wheel_ang = 0.0
 
-        # timing
         self.last_imu_t = None
         self.last_joint_t = None
 
-        # debug yaw integrators (radians)
-        self.yaw_rate_int = 0.0        # integral of the rate sent to the EKF
-        self.yaw_orient = 0.0          # unwrapped IMU orientation yaw
-        self.yaw_wheel = 0.0           # integral of wheel wz
+        self.acc_rate_dt = 0.0     # for averaging down to imu_output_rate_hz
+        self.acc_dt = 0.0
+
+        self.yaw_rate_int = 0.0
+        self.yaw_orient = 0.0
+        self.yaw_wheel = 0.0
         self.last_orient_yaw = None
 
         self.wheel_pub = self.create_publisher(Odometry, '/wheel/odom', 10)
@@ -84,8 +103,8 @@ class WheelOdometryNode(Node):
         self.create_subscription(JointState, '/joint_states', self.joint_cb, 10)
         self.create_subscription(Imu, '/imu_chassis', self.imu_cb, qos_profile_sensor_data)
 
-        src = self.get_parameter('yaw_rate_source').value
-        self.get_logger().info(f'wheel_odometry started, yaw_rate_source={src}')
+        self.get_logger().info(
+            f'wheel_odometry started: source={self.source}, imu out {hz:.0f} Hz')
 
     # ---------- helpers ----------
     def _stamp_sec(self, stamp) -> float:
@@ -104,17 +123,12 @@ class WheelOdometryNode(Node):
             self.get_logger().warn('Need 4 finite wheel velocities', throttle_duration_sec=2.0)
             return
 
-        r = self.get_parameter('wheel_radius').value
-        sep = self.get_parameter('wheel_separation').value
-        ls = self.get_parameter('left_sign').value
-        rs = self.get_parameter('right_sign').value
-
-        w_l = ls * (msg.velocity[0] + msg.velocity[2]) / 2.0   # FL, RL
-        w_r = rs * (msg.velocity[1] + msg.velocity[3]) / 2.0   # FR, RR
-        v_l, v_r = r * w_l, r * w_r
+        w_l = self.ls * (msg.velocity[0] + msg.velocity[2]) / 2.0   # FL, RL
+        w_r = self.rs * (msg.velocity[1] + msg.velocity[3]) / 2.0   # FR, RR
+        v_l, v_r = self.r * w_l, self.r * w_r
 
         vx = (v_r + v_l) / 2.0
-        wz = (v_r - v_l) / sep
+        wz = (v_r - v_l) / self.sep
         self.wheel_lin, self.wheel_ang = vx, wz
 
         t = self._stamp_sec(msg.header.stamp)
@@ -136,12 +150,12 @@ class WheelOdometryNode(Node):
         for i in (0, 7, 14, 21, 28, 35):
             odom.pose.covariance[i] = 1e6
         tc = odom.twist.covariance
-        tc[0] = self.get_parameter('wheel_vx_var').value
+        tc[0] = self.vx_var
         tc[7] = 1e-2
         tc[14] = 1e6
         tc[21] = 1e6
         tc[28] = 1e6
-        tc[35] = self.get_parameter('wheel_wz_var').value
+        tc[35] = self.wz_var
         self.wheel_pub.publish(odom)
 
     # ---------- IMU ----------
@@ -151,7 +165,6 @@ class WheelOdometryNode(Node):
         self.last_imu_t = t
         dt_ok = self._valid_dt(dt)
 
-        # Orientation yaw, unwrapped with wrap-safe differencing.
         orient_rate = None
         q = msg.orientation
         has_q = (msg.orientation_covariance[0] != -1.0 and
@@ -165,8 +178,7 @@ class WheelOdometryNode(Node):
                     orient_rate = d / dt
             self.last_orient_yaw = yaw
 
-        source = self.get_parameter('yaw_rate_source').value
-        if source == 'orientation':
+        if self.source == 'orientation':
             if orient_rate is None:
                 return
             rate = orient_rate
@@ -178,12 +190,8 @@ class WheelOdometryNode(Node):
             rate = raw - self.bias
             raw_for_bias = raw
 
-        # Spike rejection
-        max_rate = self.get_parameter('max_yaw_rate').value
-        max_jump = self.get_parameter('max_yaw_rate_jump').value
-        max_rej = self.get_parameter('max_consecutive_rejects').value
-        bad = abs(rate) > max_rate or abs(rate - self.last_good_rate) > max_jump
-        if bad and self.reject_count < max_rej:
+        bad = abs(rate) > self.max_rate or abs(rate - self.last_good_rate) > self.max_jump
+        if bad and self.reject_count < self.max_rej:
             self.reject_count += 1
             self.get_logger().warn(
                 f'Yaw-rate spike rejected: {rate:.2f} rad/s (last good {self.last_good_rate:.2f})',
@@ -197,15 +205,23 @@ class WheelOdometryNode(Node):
 
         if dt_ok:
             self.yaw_rate_int += rate * dt
+            self.acc_rate_dt += rate * dt     # average, not drop, so no rotation is lost
+            self.acc_dt += dt
+
+        if self.acc_dt <= 0.0 or self.acc_dt < self.out_period:
+            return
+        avg_rate = self.acc_rate_dt / self.acc_dt
+        self.acc_rate_dt = 0.0
+        self.acc_dt = 0.0
 
         out = Imu()
         out.header.stamp = msg.header.stamp
-        out.header.frame_id = self.get_parameter('imu_output_frame').value
+        out.header.frame_id = self.imu_frame
         out.orientation_covariance[0] = -1.0
-        out.angular_velocity.z = rate
+        out.angular_velocity.z = avg_rate
         out.angular_velocity_covariance[0] = 1e6
         out.angular_velocity_covariance[4] = 1e6
-        out.angular_velocity_covariance[8] = self.get_parameter('gyro_var').value
+        out.angular_velocity_covariance[8] = self.gyro_var
         out.linear_acceleration_covariance[0] = -1.0
         self.imu_pub.publish(out)
 
@@ -216,7 +232,7 @@ class WheelOdometryNode(Node):
         self.debug_pub.publish(dbg)
 
     def _update_bias(self, raw_rate: float):
-        if not self.get_parameter('auto_bias').value:
+        if not self.auto_bias:
             return
         now = self.get_clock().now().nanoseconds / 1e9
         still = abs(self.wheel_lin) < 0.005 and abs(self.wheel_ang) < 0.01

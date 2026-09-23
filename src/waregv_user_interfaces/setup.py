@@ -29,7 +29,7 @@ setup(
             'headlight_node = waregv_user_interfaces.headlight_node:main',
             'nav2_status_node = waregv_user_interfaces.nav2_status_node:main',
             'sensor_health_node = waregv_user_interfaces.sensor_health_node:main',
-            'tts_node = waregv_user_interfaces.tts_node:main',
+           
         ],
     },
 )
