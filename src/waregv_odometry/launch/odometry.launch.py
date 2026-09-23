@@ -52,5 +52,13 @@ def generate_launch_description():
         output='screen',
         parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
     )
+    
+    yaw_logger = Node(
+        package='waregv_odometry',
+        executable='yaw_logger',
+        name='yaw_logger',
+        output='screen',
+        parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
+    )
 
-    return LaunchDescription(args + [wheel_odometry, ekf_node, odom_euler])
+    return LaunchDescription(args + [wheel_odometry, ekf_node, odom_euler,yaw_logger])
