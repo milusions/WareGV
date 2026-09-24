@@ -42,7 +42,8 @@ setup(
     entry_points={
         'console_scripts': [
               "imu_chasis_relay=waregv_hardware.imu_chasis_relay:main",
-                                                       "motor_system_node=waregv_hardware.motor_system_node:main"
+                                                       "motor_system_node=waregv_hardware.motor_system_node:main",
+                                                       "camera_streamer=waregv_hardware.camera_webrtc_streamer:main"
         ],
     },
 )

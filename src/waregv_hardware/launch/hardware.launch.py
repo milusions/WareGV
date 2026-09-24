@@ -38,7 +38,14 @@ def generate_launch_description():
         parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
         output="screen",
     )
-
+    
+    # camera_streamer = Node(
+    #         package="waregv_hardware",
+    #         executable="camera_streamer",
+    #         parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+    #         output="screen",
+    #     )
+      
     # realsense_launch = IncludeLaunchDescription(
     #     PythonLaunchDescriptionSource([
     #         os.path.join(
