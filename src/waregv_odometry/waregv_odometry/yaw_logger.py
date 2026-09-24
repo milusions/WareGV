@@ -56,7 +56,7 @@ class YawLogger(Node):
 
         log_dir = os.path.expanduser(self.get_parameter('log_dir').value)
         os.makedirs(log_dir, exist_ok=True)
-        name = 'yaw_log.csv'
+        name = datetime.now().strftime('yaw_log_%Y%m%d_%H%M%S.csv')
         self.path = os.path.join(log_dir, name)
         self.file = open(self.path, 'w', newline='')
         self.writer = csv.writer(self.file)
@@ -64,7 +64,8 @@ class YawLogger(Node):
             't', 'gyro_z_raw', 'yaw_int_raw_deg', 'imu_yaw_deg', 'rate_filtered',
             'dbg_rate_deg', 'dbg_orient_deg', 'dbg_wheel_deg',
             'wheel_vx', 'wheel_wz', 'odom_yaw_deg', 'odom_wz',
-            'cmd_vx', 'cmd_wz', 'imu_hz', 'joint_hz', 'marker'])
+            'cmd_vx', 'cmd_wz', 'imu_hz', 'joint_hz',
+            'gyro_glitches', 'orient_glitches', 'marker'])
 
         self.t0 = self.get_clock().now().nanoseconds * 1e-9
 
@@ -74,6 +75,9 @@ class YawLogger(Node):
         self.imu_yaw = 0.0
         self.last_imu_t = None
         self.last_q_yaw = None
+        self.gyro_glitches = 0       # |gyro z| > 8 rad/s samples (excluded from the raw integral)
+        self.orient_glitches = 0     # >0.5 rad single-sample heading jumps (excluded)
+        self.orient_rejects = 0
         self.rate_filtered = 0.0
         self.dbg = (0.0, 0.0, 0.0)
         self.wheel_vx = 0.0
@@ -110,18 +114,31 @@ class YawLogger(Node):
         t = stamp.sec + stamp.nanosec * 1e-9
         if t == 0.0:
             t = self.get_clock().now().nanoseconds * 1e-9
-        if self.last_imu_t is not None:
+        if self.last_imu_t is not None and math.isfinite(self.gyro_raw):
             dt = t - self.last_imu_t
-            if 0.0 < dt < 0.2 and math.isfinite(self.gyro_raw):
+            if abs(self.gyro_raw) > 8.0:
+                self.gyro_glitches += 1          # corrupted sample: count, don't integrate
+            elif 0.0 < dt < 0.5:
                 self.yaw_int_raw += self.gyro_raw * dt
         self.last_imu_t = t
 
         q = msg.orientation
         if (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 0.5:
             yaw = quat_to_yaw(q)
-            if self.last_q_yaw is not None:
-                self.imu_yaw += wrap_pi(yaw - self.last_q_yaw)
-            self.last_q_yaw = yaw
+            if self.last_q_yaw is None:
+                self.last_q_yaw = yaw
+            else:
+                d = wrap_pi(yaw - self.last_q_yaw)
+                if abs(d) > 0.5:                 # single-sample heading glitch
+                    self.orient_glitches += 1
+                    self.orient_rejects += 1
+                    if self.orient_rejects >= 5:  # persistent jump: resync, no integration
+                        self.last_q_yaw = yaw
+                        self.orient_rejects = 0
+                else:
+                    self.imu_yaw += d
+                    self.last_q_yaw = yaw
+                    self.orient_rejects = 0
 
     def filt_cb(self, msg: Imu):
         self.rate_filtered = msg.angular_velocity.z
@@ -173,6 +190,7 @@ class YawLogger(Node):
             f'{self.odom_wz:.6f}',
             f'{self.cmd_vx:.4f}', f'{self.cmd_wz:.4f}',
             f'{imu_hz:.1f}', f'{joint_hz:.1f}',
+            self.gyro_glitches, self.orient_glitches,
             self.marker])
         self.marker = ''
 

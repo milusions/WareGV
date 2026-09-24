@@ -185,7 +185,7 @@ class WheelOdometryNode(Node):
         t = self._stamp_sec(msg.header.stamp)
         dt = None if self.last_joint_t is None else t - self.last_joint_t
         self.last_joint_t = t
-        if dt is not None and 0.0 < dt < 0.2:
+        if dt is not None and 0.0 < dt < 0.5:     # joint_states can be slow (~7 Hz seen)
             self.yaw_wheel += wz * dt
 
         stamp = msg.header.stamp
