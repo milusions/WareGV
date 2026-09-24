@@ -62,13 +62,13 @@ class WheelOdometryNode(Node):
         super().__init__('wheel_odometry')
 
         self.declare_parameter('wheel_radius', 0.036)
-        self.declare_parameter('wheel_separation', 0.30)   # EFFECTIVE track width; calibrate
+        self.declare_parameter('wheel_separation', 0.392)  # EFFECTIVE track width; calibrate
         self.declare_parameter('left_sign', 1.0)
         self.declare_parameter('right_sign', 1.0)
         self.declare_parameter('yaw_rate_source', 'gyro')  # 'gyro' | 'orientation'
         self.declare_parameter('gyro_bias_z', 0.0)
         self.declare_parameter('gyro_scale', 1.0)          # true_angle / measured_angle
-        self.declare_parameter('max_yaw_rate', 8.0)        # rad/s
+        self.declare_parameter('max_yaw_rate', 4.0)        # rad/s
         self.declare_parameter('max_yaw_accel', 80.0)      # rad/s^2
         self.declare_parameter('min_jump', 0.5)            # rad/s
         self.declare_parameter('hampel_min', 0.08)         # rad/s minimum outlier threshold
@@ -83,7 +83,7 @@ class WheelOdometryNode(Node):
         self.declare_parameter('diag_thresh_deg', 2.0)
         self.declare_parameter('imu_output_frame', 'base_footprint')
         self.declare_parameter('imu_output_rate_hz', 50.0)
-        self.declare_parameter('gyro_var', 1e-4)
+        self.declare_parameter('gyro_var', 1e-2)
         self.declare_parameter('wheel_vx_var', 4e-4)
         self.declare_parameter('wheel_wz_var', 5e-2)
 
