@@ -33,7 +33,7 @@ except ImportError:
 # --- Configuration Defaults ---
 BT_MAC_ADDRESS = "00:11:22:33:44:55"                     # Replace with your Bluetooth MAC
 PROFILE_SERVICE_URL = "http://localhost:8000/profile_setting"  # Target profile service
-STATUS_GPIO_PIN = 17                                     # BCM Pin for speaking state
+STATUS_GPIO_PIN = 26                                     # BCM Pin for speaking state
 SERVER_PORT = 8080                                       # HTTP Server port
 DEFAULT_VOICE = "kal_diphone"
 DEFAULT_SPEED = 1.0

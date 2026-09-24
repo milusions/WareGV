@@ -23,7 +23,7 @@ class ArduinoNavBridgeNode(Node):
         # Declare parameters
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
-        self.declare_parameter('led_pin', 18)
+        self.declare_parameter('led_pin', 17)
 
         port = self.get_parameter('port').get_parameter_value().string_value
         baudrate = self.get_parameter('baudrate').get_parameter_value().integer_value

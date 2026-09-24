@@ -16,7 +16,7 @@ class IntegratedSensorHealthNode(Node):
         super().__init__('integrated_sensor_health_node')
 
         # --- Parameters ---
-        self.declare_parameter('gpio_pin', 18)
+        self.declare_parameter('gpio_pin', 19)
         self.declare_parameter('timeout_sec', 2.0)
 
         self.led_pin = self.get_parameter('gpio_pin').get_parameter_value().integer_value
