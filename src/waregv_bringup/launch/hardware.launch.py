@@ -221,7 +221,6 @@ def generate_launch_description():
             waregv_controller,
             waregv_mapping,
             waregv_navigation,
-     waregv_dashboard,
-     waregv_user_interfaces
+  
         ]
     )
