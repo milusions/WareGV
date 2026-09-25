@@ -184,11 +184,17 @@ class BearGVBridgeNode(Node):
         )
 
         # -------------------------------------------------
-        # Arduino profile publisher
+        # Arduino profile & TTS publishers
         # -------------------------------------------------
         self.profile_pub = self.create_publisher(
             String,
             "profile_setting",
+            10,
+        )
+
+        self.tts_pub = self.create_publisher(
+            String,
+            "/robot_operator/speak_device",
             10,
         )
 
@@ -515,6 +521,12 @@ class BearGVBridgeNode(Node):
         msg = String()
         msg.data = profile_str
         self.profile_pub.publish(msg)
+        
+    def request_speech(self, text: str):
+        msg = String()
+        msg.data = text
+        self.tts_pub.publish(msg)
+        self.get_logger().info(f"Published speech request: {text}")
 
     @staticmethod
     def yaw_deg_to_quaternion(yaw_deg: float):
@@ -1294,6 +1306,9 @@ async def helio_state(
 
     if ros_node and req.state:
         ros_node.set_profile(req.state)
+        
+    if ros_node and req.event == "speaking_start" and req.text:
+        ros_node.request_speech(req.text)
 
     try:
         import httpx
@@ -1303,15 +1318,6 @@ async def helio_state(
         ) as client:
 
             if (
-                req.event == "speaking_start"
-                and req.text
-            ):
-                await client.post(
-                    "http://127.0.0.1:8080/speak",
-                    json={"text": req.text},
-                )
-
-            elif (
                 req.event == "sound_play"
                 and req.sound_name
             ):
@@ -1325,7 +1331,7 @@ async def helio_state(
     except Exception as exc:
         if ros_node:
             ros_node.get_logger().warning(
-                f"TTS operator unavailable: {exc}"
+                f"Sound operator unavailable: {exc}"
             )
 
     return {"ok": True}

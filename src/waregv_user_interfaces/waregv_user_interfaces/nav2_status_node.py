@@ -112,7 +112,7 @@ class ArduinoNavBridgeNode(Node):
             self.led.blink(on_time=0.05, off_time=0.05, background=True)
 
     def request_speech(self, text: str):
-        """Publishes text to the TTS topic."""
+        """Publishes text to the TTS topic using std_msgs/String."""
         if text == self.last_spoken_text:
             return
         self.last_spoken_text = text
