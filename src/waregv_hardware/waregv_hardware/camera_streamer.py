@@ -6,13 +6,25 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+import sys
 
 import asyncio
 import threading
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from aiortc.mediastreams import VideoStreamTrack
-import av
+
+# Diagnostic import block to catch environment mismatches
+try:
+    from aiortc import RTCPeerConnection, RTCSessionDescription
+    from aiortc.mediastreams import VideoStreamTrack
+    import av
+except ModuleNotFoundError as e:
+    print(f"\n[CRITICAL ERROR] Failed to import WebRTC dependencies: {e}")
+    print(f"Current Python executable: {sys.executable}")
+    print(f"Current sys.path:")
+    for p in sys.path:
+        print(f" - {p}")
+    print("Ensure aiortc and av are installed in THIS specific Python environment.\n")
+    sys.exit(1)
 
 class ROSVideoStreamTrack(VideoStreamTrack):
     """

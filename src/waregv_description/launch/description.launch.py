@@ -31,9 +31,12 @@ def generate_launch_description():
         "controller.yaml"
     ])
     
-    # Process Xacro into URDF string
+    # Process Xacro into URDF string, passing the controllers_yaml_path
     robot_description = ParameterValue(
-        Command(["xacro ", urdf_file_path]),
+        Command([
+            "xacro ", urdf_file_path, 
+            " controllers_yaml_path:=", controllers_yaml_path
+        ]),
         value_type=str
     )
 
@@ -48,10 +51,7 @@ def generate_launch_description():
         }]
     ) 
 
-  
-    
     return LaunchDescription([
         use_sim_time_arg,
         robot_state_publisher,
-   
     ])
