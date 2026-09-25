@@ -26,9 +26,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'headlight_node = waregv_user_interfaces.headlight_node:main',
+
             'nav2_status_node = waregv_user_interfaces.nav2_status_node:main',
-            'sensor_health_node = waregv_user_interfaces.sensor_health_node:main',
            
         ],
     },

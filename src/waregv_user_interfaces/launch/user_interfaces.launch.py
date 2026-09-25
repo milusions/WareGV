@@ -13,14 +13,6 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration('use_sim_time')
 
-    # Node definitions
-    headlight_node = Node(
-        package='waregv_user_interfaces',
-        executable='headlight_node',
-        name='headlight_node',
-        parameters=[{'use_sim_time': use_sim_time}],
-        output='screen'
-    )
 
     nav2_status_node = Node(
         package='waregv_user_interfaces',
@@ -30,19 +22,10 @@ def generate_launch_description():
         output='screen'
     )
 
-    sensor_health_node = Node(
-        package='waregv_user_interfaces',
-        executable='sensor_health_node',
-        name='sensor_health_node',
-        parameters=[{'use_sim_time': use_sim_time}],
-        output='screen'
-    )
 
 
 
     return LaunchDescription([
         use_sim_time_arg,
-        headlight_node,
         nav2_status_node,
-        sensor_health_node,
     ])
