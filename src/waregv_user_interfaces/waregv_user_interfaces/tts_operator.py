@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Robot Operator System - ROS 2 Neural TTS Node (JSON/Params Enabled)
+Robot Operator System - ROS 2 Neural TTS Node (gpiozero Non-Root GPIO)
 
 Features:
 - Native ROS 2 Integration (Subscribes to Nav2 bridge, publishes state).
+- gpiozero hardware integration (works without root/sudo permissions).
 - JSON Parameter Support over String topic (volume, voice, speed).
 - Native Python PiperVoice caching (drops synthesis time to < 0.5s).
-- Async TTS Queue (ROS 2 callbacks return immediately).
-- Bluetooth Anti-Sleep stream.
+- Async TTS Queue & Bluetooth Anti-Sleep stream.
 """
 
 import os
@@ -24,7 +24,13 @@ import json
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-import RPi.GPIO as GPIO
+
+# Use gpiozero for non-root GPIO access
+try:
+    from gpiozero import LED
+    GPIO_AVAILABLE = True
+except ImportError:
+    GPIO_AVAILABLE = False
 
 # Attempt to load native Piper for instant in-memory synthesis
 try:
@@ -84,11 +90,17 @@ class RobotTTSNode(Node):
         self.piper_binary = None
         self.piper_model = None
 
-        # Enforce strict hardware initialization
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.status_pin, GPIO.OUT)
-        GPIO.output(self.status_pin, GPIO.LOW)
-        self.get_logger().info(f'GPIO initialized successfully on BCM pin {self.status_pin}')
+        # Initialize GPIO using gpiozero (Supports non-root user via /dev/gpiomem)
+        self.status_led = None
+        if GPIO_AVAILABLE:
+            try:
+                self.status_led = LED(self.status_pin)
+                self.status_led.off()
+                self.get_logger().info(f'gpiozero LED initialized successfully on BCM pin {self.status_pin}')
+            except Exception as e:
+                self.get_logger().error(f'Failed to initialize gpiozero LED: {e}')
+        else:
+            self.get_logger().warn('gpiozero library not found. Hardware signaling disabled.')
 
         # --- ROS 2 Interfaces ---
         self.profile_pub = self.create_publisher(String, 'profile_setting', 10)
@@ -166,7 +178,12 @@ class RobotTTSNode(Node):
     def _set_speaking_state(self, speaking: bool):
         with self.lock:
             self.is_speaking = speaking
-            GPIO.output(self.status_pin, GPIO.HIGH if speaking else GPIO.LOW)
+            if self.status_led:
+                if speaking:
+                    self.status_led.on()
+                else:
+                    self.status_led.off()
+
         status = "is_speaking" if speaking else "is_not_speaking"
         msg = String()
         msg.data = status
@@ -185,9 +202,6 @@ class RobotTTSNode(Node):
             self.current_process = None
         self._set_speaking_state(False)
 
-    # -----------------------------------------------------------------------
-    # JSON Parsing Callback
-    # -----------------------------------------------------------------------
     def speak_callback(self, msg: String):
         """Accepts either plain text OR a JSON string with options."""
         raw_data = msg.data.strip()
@@ -198,7 +212,6 @@ class RobotTTSNode(Node):
         volume = 1.0
 
         try:
-            # Attempt to parse advanced parameters
             data = json.loads(raw_data)
             if isinstance(data, dict):
                 text = data.get("text", "")
@@ -208,7 +221,6 @@ class RobotTTSNode(Node):
             else:
                 text = str(data)
         except (json.JSONDecodeError, ValueError):
-            # If it fails, fallback to treating the entire string as speech text
             text = raw_data
 
         if text:
@@ -287,8 +299,6 @@ class RobotTTSNode(Node):
         try:
             self._set_speaking_state(True)
             
-            # Apply volume if using PulseAudio/PipeWire (paplay)
-            # 65536 is 100% volume.
             if shutil.which("paplay"):
                 vol_int = int(65536 * max(0.0, volume))
                 cmd = ["paplay", f"--volume={vol_int}", wav_path]
@@ -319,7 +329,8 @@ class RobotTTSNode(Node):
     def destroy_node(self):
         self.get_logger().info("Shutting down Robot Operator System...")
         self.stop_speech()
-        GPIO.cleanup()
+        if self.status_led:
+            self.status_led.close()
         super().destroy_node()
 
 def main(args=None):

@@ -2,7 +2,9 @@
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
-import RPi.GPIO as GPIO
+
+from gpiozero import LED
+from gpiozero.exc import GPIOError
 
 
 class HeadlightServiceNode(Node):
@@ -13,11 +15,14 @@ class HeadlightServiceNode(Node):
         self.declare_parameter('gpio_pin', 18)
         self.led_pin = self.get_parameter('gpio_pin').get_parameter_value().integer_value
 
-        # Enforce strict hardware initialization
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.led_pin, GPIO.OUT)
-        GPIO.output(self.led_pin, GPIO.LOW)
-        self.get_logger().info(f'GPIO initialized successfully on BCM pin {self.led_pin}')
+        # Initialize hardware using gpiozero (uses BCM pin numbering by default)
+        try:
+            self.led = LED(self.led_pin)
+            self.led.off()
+            self.get_logger().info(f'GPIO LED initialized successfully on BCM pin {self.led_pin}')
+        except GPIOError as e:
+            self.get_logger().error(f'Failed to initialize GPIO pin {self.led_pin}: {e}')
+            raise
 
         # Create ROS 2 service named 'headlight' using std_srvs/srv/SetBool
         self.srv = self.create_service(
@@ -35,12 +40,12 @@ class HeadlightServiceNode(Node):
         request.data == False --> LED OFF
         """
         if request.data:
-            GPIO.output(self.led_pin, GPIO.HIGH)
+            self.led.on()
             response.success = True
             response.message = f"Headlight switched ON (BCM Pin {self.led_pin})"
             self.get_logger().info("Service call received: Headlight switched ON")
         else:
-            GPIO.output(self.led_pin, GPIO.LOW)
+            self.led.off()
             response.success = True
             response.message = f"Headlight switched OFF (BCM Pin {self.led_pin})"
             self.get_logger().info("Service call received: Headlight switched OFF")
@@ -49,7 +54,9 @@ class HeadlightServiceNode(Node):
 
     def destroy_node(self):
         # Clean up GPIO pins when shutting down the ROS node
-        GPIO.cleanup()
+        if hasattr(self, 'led') and self.led:
+            self.led.off()
+            self.led.close()
         super().destroy_node()
 
 
