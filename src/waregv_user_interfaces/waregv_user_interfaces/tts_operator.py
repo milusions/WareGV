@@ -32,7 +32,7 @@ except ImportError:
 
 
 # --- Configuration Defaults ---
-BT_MAC_ADDRESS = "41:42:5A:7C:16:99"                       # Replace with your actual speaker MAC address
+BT_MAC_ADDRESS = "00:11:22:33:44:55"                     # Replace with your actual speaker MAC address
 PROFILE_SERVICE_URL = "http://localhost:8000/profile_setting"  # Target profile service
 STATUS_GPIO_PIN = 17                                     # BCM Pin for speaking state
 SERVER_PORT = 8080                                       # HTTP Server port
@@ -59,9 +59,10 @@ class RobotOperatorSystem:
         self.playback_thread = None
         self.lock = threading.Lock()
         self.is_speaking = False
+        self.gpio_available = GPIO_AVAILABLE
 
         # Configure GPIO hardware pin
-        if GPIO_AVAILABLE:
+        if self.gpio_available:
             try:
                 GPIO.setmode(GPIO.BCM)
                 GPIO.setup(self.status_pin, GPIO.OUT)
@@ -69,7 +70,7 @@ class RobotOperatorSystem:
                 print(f"[GPIO] Status pin initialized on BCM GPIO {self.status_pin}.")
             except Exception as e:
                 print(f"[GPIO] Failed to initialize GPIO: {e}. Running without hardware signaling.")
-                GPIO_AVAILABLE = False
+                self.gpio_available = False
         else:
             print("[GPIO] RPi.GPIO library not available. Hardware pin signaling disabled.")
 
@@ -127,7 +128,7 @@ class RobotOperatorSystem:
             self.is_speaking = speaking
 
             # Hardware Pin update
-            if GPIO_AVAILABLE:
+            if self.gpio_available:
                 try:
                     GPIO.output(self.status_pin, GPIO.HIGH if speaking else GPIO.LOW)
                 except Exception as e:
@@ -219,7 +220,7 @@ class RobotOperatorSystem:
     def cleanup(self):
         """Clean resource handles on shutdown."""
         self.stop_speech()
-        if GPIO_AVAILABLE:
+        if self.gpio_available:
             try:
                 GPIO.output(self.status_pin, GPIO.LOW)
                 GPIO.cleanup()
