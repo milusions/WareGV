@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import PoseStamped
-from waregv_user_interfaces.srv import SetString
+from std_msgs.msg import String
 
 # Raspberry Pi GPIO handling
 try:
@@ -59,12 +59,12 @@ class ArduinoNavBridgeNode(Node):
             GoalStatusArray, '/navigate_to_pose/_action/status', self.status_callback, 10
         )
 
-        # Service Client: TTS speech request
-        self.tts_client = self.create_client(SetString, '/robot_operator/speak_device')
+        # Publisher: TTS speech request (Replaces the service client)
+        self.tts_pub = self.create_publisher(String, '/robot_operator/speak_device', 10)
 
-        # Service Server: Profile setting ("speaking" / "not_speaking")
-        self.srv_profile = self.create_service(
-            SetString, 'profile_setting', self.handle_profile_setting
+        # Subscriber: Profile setting (Replaces the service server)
+        self.profile_sub = self.create_subscription(
+            String, 'profile_setting', self.handle_profile_setting, 10
         )
 
         # =============================================================
@@ -111,51 +111,35 @@ class ArduinoNavBridgeNode(Node):
             # Frantic rapid strobe (50ms ON / 50ms OFF)
             self.led.blink(on_time=0.05, off_time=0.05, background=True)
 
-    def request_speech_async(self, text: str):
-        """Non-blocking call to /robot_operator/speak_device service."""
+    def request_speech(self, text: str):
+        """Publishes text to the TTS topic."""
         if text == self.last_spoken_text:
             return
         self.last_spoken_text = text
 
-        if not self.tts_client.service_is_ready():
-            self.get_logger().warn("Service /robot_operator/speak_device unavailable")
-            return
+        msg = String()
+        msg.data = text
+        self.tts_pub.publish(msg)
+        self.get_logger().info(f"Published speech request: {text}")
 
-        req = SetString.Request()
-        req.data = text
-        future = self.tts_client.call_async(req)
-        future.add_done_callback(self._speech_done_callback)
-
-    def _speech_done_callback(self, future):
-        try:
-            response = future.result()
-            self.get_logger().info(f"Speech service acknowledged: {response.message}")
-        except Exception as e:
-            self.get_logger().error(f"Speech service call failed: {e}")
-
-    def handle_profile_setting(self, request, response):
-        """Service server callback listening for speech state changes."""
-        cmd = request.data.strip().lower()
+    def handle_profile_setting(self, msg: String):
+        """Subscriber callback listening for speech state changes."""
+        cmd = msg.data.strip().lower()
 
         if cmd in ["speaking", "is_speaking", "true"]:
             if self.last_speaking_state != "is_speaking":
                 self.last_speaking_state = "is_speaking"
                 self.send_json({"profile": "is_speaking"})
-            response.success = True
-            response.message = "Profile set to is_speaking"
+            self.get_logger().info("Profile set to is_speaking")
 
         elif cmd in ["not_speaking", "is_not_speaking", "false", "stopped"]:
             if self.last_speaking_state != "is_not_speaking":
                 self.last_speaking_state = "is_not_speaking"
                 self.send_json({"profile": "is_not_speaking"})
-            response.success = True
-            response.message = "Profile set to is_not_speaking"
+            self.get_logger().info("Profile set to is_not_speaking")
 
         else:
-            response.success = False
-            response.message = f"Invalid command '{request.data}'. Use 'speaking' or 'not_speaking'."
-
-        return response
+            self.get_logger().warn(f"Invalid profile command '{msg.data}'. Use 'speaking' or 'not_speaking'.")
 
     def goal_pose_callback(self, msg: PoseStamped):
         self.set_led_state("goal_received")
@@ -163,7 +147,7 @@ class ArduinoNavBridgeNode(Node):
             "profile": "goal_received",
             "description": f"Goal received at x: {msg.pose.position.x:.2f}, y: {msg.pose.position.y:.2f}"
         })
-        self.request_speech_async("I have received the goal")
+        self.request_speech("I have received the goal")
 
     def status_callback(self, msg: GoalStatusArray):
         if not msg.status_list:
@@ -180,22 +164,22 @@ class ArduinoNavBridgeNode(Node):
         if status == GoalStatus.STATUS_ACCEPTED:
             self.set_led_state("goal_received")
             self.send_json({"profile": "goal_received", "description": "Goal accepted"})
-            self.request_speech_async("I have received the goal")
+            self.request_speech("I have received the goal")
 
         elif status == GoalStatus.STATUS_EXECUTING:
             self.set_led_state("navigating")
             self.send_json({"profile": "navigated", "description": "Actively navigating path"})
-            self.request_speech_async("I am navigating to the goal")
+            self.request_speech("I am navigating to the goal")
 
         elif status == GoalStatus.STATUS_SUCCEEDED:
             self.set_led_state("goal_reached")
             self.send_json({"profile": "goal_reached", "description": "Target goal reached"})
-            self.request_speech_async("I have reached the goal")
+            self.request_speech("I have reached the goal")
 
         elif status in (GoalStatus.STATUS_ABORTED, GoalStatus.STATUS_CANCELED):
             self.set_led_state("navigation_error")
             self.send_json({"profile": "navigation_error", "description": "Navigation aborted or canceled"})
-            self.request_speech_async("There is an error during navigation")
+            self.request_speech("There is an error during navigation")
 
 
 def main(args=None):
