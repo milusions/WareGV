@@ -234,6 +234,16 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(waregv_suite_launch_file_path),
                 launch_arguments={"use_sim_time": use_sim_time}.items(),
             )
+    
+    
+    waregv_user_interfaces_launch_file_path = os.path.join(
+                get_package_share_directory("waregv_user_interfaces"), "launch", "user_interfaces.launch.py"
+            )
+    waregv_user_interfaces = IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(waregv_user_interfaces_launch_file_path),
+                launch_arguments={"use_sim_time": use_sim_time}.items(),
+            )
+    
     return LaunchDescription(
         [
             robot_spawn_z_arg,
@@ -246,7 +256,7 @@ def generate_launch_description():
             waregv_urdf,
             rosbridge_node,
             foxglove_bridge,
-            
+            waregv_user_interfaces,
             gazebo_sim,
             gz_spawn_entity,
             controller_spawners,
