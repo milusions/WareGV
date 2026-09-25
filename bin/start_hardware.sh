@@ -19,9 +19,6 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
-
-MAPPING_ENABLE="true"
-NAVIGATION_ENABLE="true"
 MAX_LINEAR_VELOCITY="0.11"
 MAX_ANGULAR_VELOCITY="0.35"
 WHEEL_RADIUS="0.036"
@@ -30,14 +27,7 @@ MAP_NAME="small_warehouse"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mapping-enable)
-            MAPPING_ENABLE="$2"
-            shift 2
-            ;;
-        --navigation-enable)
-            NAVIGATION_ENABLE="$2"
-            shift 2
-            ;;
+    
         --max-linear-velocity)
             MAX_LINEAR_VELOCITY="$2"
             shift 2
@@ -65,13 +55,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-MODE="Teleop / Idle"
-if [[ "$MAPPING_ENABLE" == "true" ]]; then
-    MODE="Mapping (SLAM)"
-elif [[ "$NAVIGATION_ENABLE" == "true" ]]; then
-    MODE="Autonomous Navigation"
-fi
-
 # Clear old log file content before running
 > "$LOG_FILE"
 
@@ -87,8 +70,6 @@ source install/setup.bash
 
 # Execute launch in background
 stdbuf -oL -eL ros2 launch waregv_bringup hardware.launch.py \
-    mapping_enable:="$MAPPING_ENABLE" \
-    navigation_enable:="$NAVIGATION_ENABLE" \
     max_linear_velocity:="$MAX_LINEAR_VELOCITY" \
     max_angular_velocity:="$MAX_ANGULAR_VELOCITY" \
     wheel_radius:="$WHEEL_RADIUS" \

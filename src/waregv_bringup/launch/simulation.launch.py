@@ -30,10 +30,10 @@ def generate_launch_description():
         name="max_angular_velocity", default_value=str(0.35)
     )
     wheel_radius_arg = DeclareLaunchArgument(
-        name="wheel_radius", default_value="0.036"
+        name="wheel_radius", default_value="0.035"
     )
     track_width_arg = DeclareLaunchArgument(
-        name="track_width", default_value="0.192"
+        name="track_width", default_value="0.168"
     )
     model_arg = DeclareLaunchArgument(
         name="model", default_value="waregv.urdf.xacro"
@@ -75,7 +75,7 @@ def generate_launch_description():
     )
     gazebo_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(gazebo_sim_launch_file_path),
-        launch_arguments={"world_name": world_name_conf}.items(),
+        launch_arguments={"world_name": world_name_conf,"use_sim_time": use_sim_time}.items(),
     )
 
     gz_spawn_entity = Node(
@@ -137,7 +137,6 @@ def generate_launch_description():
         remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
     )
 
-    
     waregv_odometry_launch_file_path = os.path.join(
             get_package_share_directory("waregv_odometry"),
             "launch",
@@ -147,11 +146,10 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
             launch_arguments={
                 "use_sim_time": use_sim_time,
-               
                 "wheel_radius": wheel_radius_conf,
-         
             }.items(),
         )
+        
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
         "launch",
@@ -220,10 +218,17 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
             launch_arguments={
                 "use_sim_time": use_sim_time,
+                "max_linear_velocity": max_linear_velocity_conf,
+                "max_angular_velocity": max_angular_velocity_conf,
             }.items(),
         )
-    
-
+    waregv_suite_launch_file_path = os.path.join(
+                get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
+            )
+    waregv_suite = IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(waregv_suite_launch_file_path),
+                launch_arguments={"use_sim_time": use_sim_time}.items(),
+            )
     return LaunchDescription(
         [
             robot_spawn_z_arg,
@@ -242,6 +247,8 @@ def generate_launch_description():
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
-            # waregv_mapping,
+            waregv_mapping,
+            waregv_navigation,
+            waregv_suite
         ]
     )

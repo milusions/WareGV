@@ -19,29 +19,18 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
-
-
-MAPPING_ENABLE="false"
-NAVIGATION_ENABLE="false"
 WORLD_NAME="small_warehouse"
-MAX_LINEAR_VELOCITY="0.5"
-MAX_ANGULAR_VELOCITY="3.14159265359"
-WHEEL_RADIUS="0.036"
-track_width="0.192"
+MAX_LINEAR_VELOCITY="0.11"
+MAX_ANGULAR_VELOCITY="0.5"
+WHEEL_RADIUS="0.035"
+track_width="0.168"
 MODEL="waregv.urdf.xacro"
 SPAWN_Z="0.5"
 MAP_NAME="small_warehouse"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mapping-enable)
-            MAPPING_ENABLE="$2"
-            shift 2
-            ;;
-        --navigation-enable)
-            NAVIGATION_ENABLE="$2"
-            shift 2
-            ;;
+  
         --world-name)
             WORLD_NAME="$2"
             shift 2
@@ -81,12 +70,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-MODE="Teleop / Idle"
-if [[ "$MAPPING_ENABLE" == "true" ]]; then
-    MODE="Mapping (SLAM)"
-elif [[ "$NAVIGATION_ENABLE" == "true" ]]; then
-    MODE="Autonomous Navigation"
-fi
 
 # Clear old log file content before running
 > "$LOG_FILE"
@@ -102,8 +85,6 @@ source install/setup.bash
 
 # Execute launch in background
 stdbuf -oL -eL ros2 launch waregv_bringup simulation.launch.py \
-    mapping_enable:="$MAPPING_ENABLE" \
-    navigation_enable:="$NAVIGATION_ENABLE" \
     world_name:="$WORLD_NAME" \
     max_linear_velocity:="$MAX_LINEAR_VELOCITY" \
     max_angular_velocity:="$MAX_ANGULAR_VELOCITY" \

@@ -72,28 +72,14 @@ def generate_launch_description():
         waregv_bringup_dir, "config", "twist_mux.yaml"
     )
     twist_mux_node = Node(
-    package="twist_mux",
-    executable="twist_mux",
-    name="twist_mux",
-    parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
-    remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
-    output="screen"
-)
+        package="twist_mux",
+        executable="twist_mux",
+        name="twist_mux",
+        parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
+        remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
+        output="screen"
+    )
     
-#     efk_node_params_file = os.path.join(
-#         waregv_bringup_dir, "config", "ekf_filter.yaml"
-#     )
-
-#     robot_localization_node = Node(
-#     package="robot_localization",  # Fixed package name
-#     executable="ekf_node",
-#     name="ekf_filter_node",
-#     parameters=[efk_node_params_file],
-#     remappings=[
-#         ('odometry/filtered', '/odometry/filtered')
-#     ]
-# )
-
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
         "launch",
@@ -119,9 +105,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
             launch_arguments={
                 "use_sim_time": use_sim_time,
-               
                 "wheel_radius": wheel_radius_conf,
-         
             }.items(),
         )
 
@@ -142,10 +126,10 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
         launch_arguments={
             "use_sim_time": use_sim_time,
+            "max_linear_velocity": max_linear_velocity_conf,
+            "max_angular_velocity": max_angular_velocity_conf,
         }.items(),
     )
-    
-  
 
     rosbridge_node = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(
@@ -180,11 +164,16 @@ def generate_launch_description():
         scoped=True,
         forwarding=True,
     )
-
-  
+    waregv_suite_launch_file_path = os.path.join(
+                    get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
+                )
+    waregv_suite = IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(waregv_suite_launch_file_path),
+                    launch_arguments={"use_sim_time": use_sim_time}.items(),
+                )
 
     return LaunchDescription(
-[
+        [
             max_linear_velocity_arg,
             max_angular_velocity_arg,
             wheel_radius_arg,
@@ -199,6 +188,6 @@ def generate_launch_description():
             waregv_controller,
             waregv_mapping,
             waregv_navigation,
-  
+            waregv_suite
         ]
     )
