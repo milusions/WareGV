@@ -60,15 +60,9 @@ PIPER_MODEL_DIRS = [
 
 # Preferred neural models across supported languages (Hindi & English)
 PREFERRED_MODELS = [
-    # "hi_IN-dii-medium.onnx",
-    # "hi_IN-kalpana-medium.onnx",
+     "hi_IN-priyamvada-medium.onnx",
     "en_US-lessac-medium.onnx",
     "en_US-lessac-high.onnx",
-    "en_US-amy-medium.onnx",
-    "en_US-ryan-medium.onnx",
-    "en_GB-alan-medium.onnx",
-    "en_GB-alan-high.onnx",
-    "en_GB-cori-medium.onnx",
 ]
 
 DEFAULT_SPEED = 1.0

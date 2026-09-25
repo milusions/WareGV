@@ -189,7 +189,7 @@ def generate_launch_description():
             waregv_description,
             rosbridge_node,
             foxglove_bridge,
-            waregv_user_interfaces.
+            waregv_user_interfaces,
             waregv_hardware,
             twist_mux_node,
             waregv_odometry,
