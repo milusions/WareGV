@@ -42,7 +42,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         use_sim_time_arg,
-        # headlight_node,
-        # nav2_status_node,
-        # sensor_health_node,
+        headlight_node,
+        nav2_status_node,
+        sensor_health_node,
     ])
