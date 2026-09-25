@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import PoseStamped
-from example_interfaces.srv import SetString
+from waregv_user_interfaces.srv import SetString
 
 # Raspberry Pi GPIO handling
 try:

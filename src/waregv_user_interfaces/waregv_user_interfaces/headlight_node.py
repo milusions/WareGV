@@ -14,6 +14,7 @@ except ImportError:
 class HeadlightServiceNode(Node):
     def __init__(self):
         super().__init__('headlight_service_node')
+        global HAS_GPIO
 
         # Declare and read configurable GPIO pin parameter (default: BCM 18)
         self.declare_parameter('gpio_pin', 18)
@@ -21,12 +22,16 @@ class HeadlightServiceNode(Node):
 
         # Initialize hardware if available
         if HAS_GPIO:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.led_pin, GPIO.OUT)
-            GPIO.output(self.led_pin, GPIO.LOW)
-            self.get_logger().info(f'GPIO initialized on BCM pin {self.led_pin}')
+            try:
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(self.led_pin, GPIO.OUT)
+                GPIO.output(self.led_pin, GPIO.LOW)
+                self.get_logger().info(f'GPIO initialized on BCM pin {self.led_pin}')
+            except RuntimeError as e:
+                self.get_logger().error(f'Failed to initialize GPIO: {e}. Running in simulation mode.')
+                HAS_GPIO = False
         else:
-            self.get_logger().warn('RPi.GPIO library not found. Running node in hardware simulation mode.')
+            self.get_logger().warn('RPi.GPIO library not found or disabled. Running node in hardware simulation mode.')
 
         # Create ROS 2 service named 'headlight' using std_srvs/srv/SetBool
         self.srv = self.create_service(
