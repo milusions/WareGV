@@ -39,34 +39,36 @@ def generate_launch_description():
         output="screen",
     )
     
-    # camera_streamer = Node(
-    #         package="waregv_hardware",
-    #         executable="camera_streamer",
-    #         parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
-    #         output="screen",
-    #     )
+    camera_streamer = Node(
+            package="waregv_hardware",
+            executable="camera_streamer",
+            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+            output="screen",
+        )
       
-    # realsense_launch = IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource([
-    #         os.path.join(
-    #             get_package_share_directory('realsense2_camera'),
-    #             'launch',
-    #             'rs_launch.py'
-    #         )
-    #     ]),
-    #     launch_arguments={
-    #         'enable_accel': 'true',
-    #         'enable_gyro': 'true',
-    #         'unite_imu_method': '2',     
-    #         'enable_infra1': 'true',      
-    #         'enable_infra2': 'true',       
-    #         'enable_sync': 'true',    
-    #     }.items()
-    # )
+    realsense_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('realsense2_camera'),
+                'launch',
+                'rs_launch.py'
+            )
+        ]),
+        launch_arguments={
+            'enable_accel': 'true',
+            'enable_gyro': 'true',
+            'unite_imu_method': '2',     
+            'enable_infra1': 'true',      
+            'enable_infra2': 'true',       
+            'enable_sync': 'true',    
+        }.items()
+    )
     
     return LaunchDescription([
         use_sim_time_arg,  
         ydlidar_node,
         imu_chasis_relay_node,
-        motor_system_node
+        motor_system_node,
+        realsense_launch,
+        camera_streamer
     ])

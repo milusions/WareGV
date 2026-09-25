@@ -8,7 +8,22 @@ import re
 import subprocess
 import pathlib
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
+
+# --- MONKEY-PATCH FOR FASTAPI/STARLETTE MISMATCH ---
+# This safely intercepts and removes the deprecated keyword arguments 
+# that FastAPI attempts to pass to newer versions of Starlette.
+import starlette.routing
+_original_router_init = starlette.routing.Router.__init__
+
+def _patched_router_init(self, *args, **kwargs):
+    kwargs.pop('on_startup', None)
+    kwargs.pop('on_shutdown', None)
+    _original_router_init(self, *args, **kwargs)
+
+starlette.routing.Router.__init__ = _patched_router_init
+# ---------------------------------------------------
+
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
@@ -18,7 +33,6 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
 import uvicorn
 
 # ---------------------------------------------------------
