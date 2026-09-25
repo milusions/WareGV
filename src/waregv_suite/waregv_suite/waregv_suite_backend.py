@@ -234,12 +234,18 @@ class BearGVBridgeNode(Node):
 # ---------------------------------------------------------
 app = FastAPI(title="BearGV Autonomous Rover API", version="1.0")
 
+# Updated middleware configuration to explicitly handle localhost, 127.0.0.1, and all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "*"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 ros_node: BearGVBridgeNode = None
