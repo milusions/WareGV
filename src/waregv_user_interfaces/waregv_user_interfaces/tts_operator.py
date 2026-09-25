@@ -1,34 +1,16 @@
 #!/usr/bin/env python3
 """
-Robot Operator System - Neural TTS version
+Robot Operator System - Neural TTS version with Multilingual (English & Hindi) Support
 
-Drop-in replacement for the previous Festival-based tts_operator.py.
-
-External HTTP interface is intentionally preserved:
-  POST /announce
-  POST /speak
-
-JSON body:
-  {
-    "text": "Hello...",
-    "voice": null,       # optional compatibility field
-    "speed": 1.0,        # optional
-    "pitch": 0           # optional compatibility field
-  }
-
-The TTS engine is Piper (local neural TTS) instead of Festival.
-Piper produces much more natural speech than Festival/diphone synthesis.
-
-The program automatically looks for a Piper executable and a local voice
-model. Set PIPER_BINARY / PIPER_MODEL if your installation uses custom paths.
-
-Preserved:
-- Bluetooth auto-reconnect
-- GPIO 17 speaking status
-- profile_setting speaking/not speaking callbacks
-- port 8080
-- /announce and /speak
-- speech interruption/preemption
+Features:
+- Local neural speech synthesis using Piper TTS.
+- Multi-language support (English & Hindi voices).
+- Persistent Bluetooth speaker connection & auto-reconnect.
+- Startup initialization announcement ("Helio Initializing").
+- Speech preemption (new request interrupts active speech).
+- GPIO hardware pin status output (HIGH when speaking, LOW when idle).
+- Webhook status updates to profile_setting service.
+- HTTP REST API listening on port 8080.
 """
 
 import json
@@ -46,7 +28,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration Defaults
 # ---------------------------------------------------------------------------
 
 BT_MAC_ADDRESS = os.environ.get(
@@ -62,17 +44,9 @@ PROFILE_SERVICE_URL = os.environ.get(
 STATUS_GPIO_PIN = int(os.environ.get("STATUS_GPIO_PIN", "17"))
 SERVER_PORT = int(os.environ.get("SERVER_PORT", "8080"))
 
-# Piper configuration.
-# You can override these without changing this Python file:
-#
-#   export PIPER_BINARY=/path/to/piper
-#   export PIPER_MODEL=/path/to/en_US-lessac-medium.onnx
-#
 PIPER_BINARY = os.environ.get("PIPER_BINARY", "")
 PIPER_MODEL = os.environ.get("PIPER_MODEL", "")
 
-# Model search locations. This makes the program work with common local
-# Piper installations without requiring Festival configuration.
 PIPER_MODEL_DIRS = [
     os.environ.get("PIPER_MODEL_DIR", ""),
     os.path.expanduser("~/.local/share/piper-tts/voices"),
@@ -84,10 +58,10 @@ PIPER_MODEL_DIRS = [
     "/home/ubuntu/piper/voices",
 ]
 
-# Preferred natural English voices. If one is installed, it is selected.
-# lessac-medium is a good general-purpose neural voice and is considerably
-# more natural than Festival.
+# Preferred neural models across supported languages (Hindi & English)
 PREFERRED_MODELS = [
+    # "hi_IN-dii-medium.onnx",
+    # "hi_IN-kalpana-medium.onnx",
     "en_US-lessac-medium.onnx",
     "en_US-lessac-high.onnx",
     "en_US-amy-medium.onnx",
@@ -98,10 +72,6 @@ PREFERRED_MODELS = [
 ]
 
 DEFAULT_SPEED = 1.0
-
-# Small amount of output headroom. This keeps normal speech comfortable on
-# small Bluetooth speakers without making it sound aggressively processed.
-OUTPUT_GAIN_DB = float(os.environ.get("TTS_GAIN_DB", "0.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +86,7 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# TTS system
+# Robot Operator System Class
 # ---------------------------------------------------------------------------
 
 class RobotOperatorSystem:
@@ -143,20 +113,19 @@ class RobotOperatorSystem:
 
         self.piper_binary = None
         self.piper_model = None
-        self.piper_model_sample_rate = None
 
         self._configure_gpio()
         self._discover_piper()
 
+        # Start persistent Bluetooth reconnect thread
         self.bt_thread = threading.Thread(
             target=self._bluetooth_keepalive,
             daemon=True,
         )
         self.bt_thread.start()
 
-    # -----------------------------------------------------------------------
-    # GPIO
-    # -----------------------------------------------------------------------
+        # Announce initialization speech on startup
+        self.speak("Helio Initializing")
 
     def _configure_gpio(self):
         if not self.gpio_available:
@@ -167,25 +136,13 @@ class RobotOperatorSystem:
             GPIO.setmode(GPIO.BCM)
             GPIO.setup(self.status_pin, GPIO.OUT)
             GPIO.output(self.status_pin, GPIO.LOW)
-            print(
-                f"[GPIO] Status pin initialized on BCM GPIO "
-                f"{self.status_pin}."
-            )
+            print(f"[GPIO] Status pin initialized on BCM GPIO {self.status_pin}.")
         except Exception as exc:
-            print(
-                f"[GPIO] Failed to initialize GPIO: {exc}. "
-                "Running without hardware signaling."
-            )
+            print(f"[GPIO] Failed to initialize GPIO: {exc}. Running without hardware signaling.")
             self.gpio_available = False
 
-    # -----------------------------------------------------------------------
-    # Piper discovery
-    # -----------------------------------------------------------------------
-
     def _discover_piper(self):
-        """Find Piper and a usable local neural voice model."""
-
-        # Executable
+        """Find Piper binary and local voice models."""
         candidates = []
 
         if PIPER_BINARY:
@@ -204,7 +161,6 @@ class RobotOperatorSystem:
             if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
                 self.piper_binary = candidate
                 break
-
             if candidate and os.path.basename(candidate) == "piper":
                 found = shutil.which(candidate)
                 if found:
@@ -214,26 +170,21 @@ class RobotOperatorSystem:
         if self.piper_binary:
             print(f"[TTS] Piper executable: {self.piper_binary}")
         else:
-            print(
-                "[TTS] WARNING: Piper executable was not found. "
-                "Install Piper and a voice model."
-            )
+            print("[TTS] WARNING: Piper executable was not found. Please install piper-tts.")
 
-        # Explicit model gets priority.
+        # Explicit model setting
         if PIPER_MODEL and os.path.isfile(os.path.expanduser(PIPER_MODEL)):
             self.piper_model = os.path.abspath(os.path.expanduser(PIPER_MODEL))
 
-        # Otherwise search common model directories.
+        # Search model directories
         if not self.piper_model:
             for directory in PIPER_MODEL_DIRS:
                 if not directory:
                     continue
-
                 directory = os.path.expanduser(directory)
                 if not os.path.isdir(directory):
                     continue
 
-                # Prefer the known natural English voices.
                 for filename in PREFERRED_MODELS:
                     candidate = os.path.join(directory, filename)
                     if os.path.isfile(candidate):
@@ -243,12 +194,12 @@ class RobotOperatorSystem:
                 if self.piper_model:
                     break
 
-                # Final fallback: any English ONNX voice.
+                # Fallback search for any Hindi or English ONNX model
                 try:
                     models = sorted(
                         f for f in os.listdir(directory)
                         if f.lower().endswith(".onnx")
-                        and f.lower().startswith(("en_us-", "en_gb-"))
+                        and f.lower().startswith(("hi_in-", "en_us-", "en_gb-"))
                     )
                 except OSError:
                     models = []
@@ -258,54 +209,13 @@ class RobotOperatorSystem:
                     break
 
         if self.piper_model:
-            print(f"[TTS] Neural voice model: {self.piper_model}")
-            self.piper_model_sample_rate = self._read_model_sample_rate(
-                self.piper_model
-            )
+            print(f"[TTS] Default neural voice model: {self.piper_model}")
         else:
-            print(
-                "[TTS] WARNING: No Piper voice model was found. "
-                "Set PIPER_MODEL to an .onnx voice model."
-            )
-
-        if self.piper_binary and self.piper_model:
-            print("[TTS] Neural TTS ready.")
-        else:
-            print(
-                "[TTS] Neural TTS is not ready. "
-                "HTTP service will still start, but speech requests will report errors."
-            )
-
-    @staticmethod
-    def _read_model_sample_rate(model_path):
-        """Read Piper's sample rate from the adjacent JSON metadata."""
-        metadata_path = model_path + ".json"
-
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as file:
-                metadata = json.load(file)
-
-            audio = metadata.get("audio", {})
-            rate = audio.get("sample_rate")
-
-            if rate:
-                return int(rate)
-        except Exception as exc:
-            print(f"[TTS] Could not read model metadata: {exc}")
-
-        return None
-
-    # -----------------------------------------------------------------------
-    # Bluetooth
-    # -----------------------------------------------------------------------
+            print("[TTS] WARNING: No Piper voice model was found.")
 
     def _bluetooth_keepalive(self):
-        """Monitor and maintain the Bluetooth speaker connection."""
-        print(
-            f"[Bluetooth] Auto-reconnect thread active for device "
-            f"{self.mac_address}."
-        )
-
+        """Monitors and maintains connection to the Bluetooth speaker continuously."""
+        print(f"[Bluetooth] Auto-reconnect thread active for device {self.mac_address}.")
         while True:
             try:
                 result = subprocess.run(
@@ -314,101 +224,61 @@ class RobotOperatorSystem:
                     text=True,
                     timeout=5,
                 )
-
                 if result.returncode != 0:
                     pass
                 elif "Connected: yes" not in result.stdout:
-                    print(
-                        f"[Bluetooth] Device disconnected. "
-                        f"Reconnecting to {self.mac_address}..."
-                    )
-
+                    print(f"[Bluetooth] Device disconnected. Reconnecting to {self.mac_address}...")
                     subprocess.run(
                         ["bluetoothctl", "connect", self.mac_address],
                         capture_output=True,
                         text=True,
                         timeout=10,
                     )
-
-            except FileNotFoundError:
-                print(
-                    "[Bluetooth] bluetoothctl not found; "
-                    "Bluetooth keepalive disabled for this iteration."
-                )
             except Exception as exc:
                 print(f"[Bluetooth] Keepalive exception: {exc}")
 
             time.sleep(4)
 
-    # -----------------------------------------------------------------------
-    # Profile service
-    # -----------------------------------------------------------------------
-
     def _notify_profile_service(self, status: str):
-        print(
-            f"[Service Call] Notifying profile_setting -> "
-            f"status: '{status}'"
-        )
-
+        """Sends HTTP POST payload to the profile_setting service safely."""
+        print(f"[Service Call] Notifying profile_setting -> status: '{status}'")
         try:
-            payload = json.dumps({
-                "status": status,
-                "device": "robot_operator",
-            }).encode("utf-8")
-
+            payload = json.dumps({"status": status, "device": "robot_operator"}).encode("utf-8")
             request = urllib.request.Request(
                 self.profile_service_url,
                 data=payload,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-
             with urllib.request.urlopen(request, timeout=1.0):
                 pass
-
         except urllib.error.URLError:
-            print(
-                f"[Service Call] Service at {self.profile_service_url} "
-                "is unreachable (offline)."
-            )
+            print(f"[Service Call] Service at {self.profile_service_url} is unreachable (offline).")
         except Exception as exc:
-            print(
-                f"[Service Call] Failed to call profile_setting: {exc}"
-            )
+            print(f"[Service Call] Failed to call profile_setting: {exc}")
 
     def _set_speaking_state(self, speaking: bool):
         with self.lock:
             self.is_speaking = speaking
-
             if self.gpio_available:
                 try:
-                    GPIO.output(
-                        self.status_pin,
-                        GPIO.HIGH if speaking else GPIO.LOW,
-                    )
+                    GPIO.output(self.status_pin, GPIO.HIGH if speaking else GPIO.LOW)
                 except Exception as exc:
                     print(f"[GPIO] Output update failed: {exc}")
 
         status = "speaking" if speaking else "not speaking"
-
         threading.Thread(
             target=self._notify_profile_service,
             args=(status,),
             daemon=True,
         ).start()
 
-    # -----------------------------------------------------------------------
-    # Speech interruption
-    # -----------------------------------------------------------------------
-
     def stop_speech(self):
-        """Immediately interrupt synthesis/playback."""
+        """Immediately interrupts active speech output if running."""
         with self.lock:
             process = self.current_process
-
             if process and process.poll() is None:
                 print("[TTS] Interrupting current speech...")
-
                 try:
                     process.terminate()
                     process.wait(timeout=0.35)
@@ -420,78 +290,52 @@ class RobotOperatorSystem:
                         pass
                 except Exception:
                     pass
-
             self.current_process = None
 
-        # Ensure the external state is not left stuck at "speaking".
         self._set_speaking_state(False)
-
-    # -----------------------------------------------------------------------
-    # Text preparation
-    # -----------------------------------------------------------------------
 
     @staticmethod
     def _prepare_text(text: str) -> str:
-        """
-        Light natural-language cleanup.
-
-        We deliberately do not rewrite the user's words. The goal is only to
-        help the neural model interpret punctuation and whitespace naturally.
-        """
-
         text = str(text or "")
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-        # Collapse excessive whitespace while retaining line breaks.
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
-
-        # Avoid pathological empty requests.
         return text.strip()
 
-    # -----------------------------------------------------------------------
-    # Neural synthesis
-    # -----------------------------------------------------------------------
-
-    def _resolve_model(self, requested_voice):
-        """
-        Preserve the old 'voice' HTTP argument while making it optional.
-
-        A Piper voice is a model file, not a Festival voice symbol. If an
-        incoming client sends something such as 'ked_diphone', it is simply
-        ignored rather than passed to a speech engine that can crash.
-        """
-
+    def _resolve_model(self, requested_voice: str) -> str:
+        """Resolves model path based on voice argument (e.g. 'hi', 'hindi', 'en', model name)."""
         if requested_voice:
-            requested = os.path.expanduser(str(requested_voice))
+            requested = os.path.expanduser(str(requested_voice)).lower().strip()
 
-            # Allow an actual .onnx path for advanced callers.
-            if requested.lower().endswith(".onnx") and os.path.isfile(requested):
+            if requested.endswith(".onnx") and os.path.isfile(requested):
                 return requested
 
-            # Allow a model filename if it exists in our known directories.
-            filename = os.path.basename(requested)
             for directory in PIPER_MODEL_DIRS:
                 if not directory:
                     continue
-                candidate = os.path.join(
-                    os.path.expanduser(directory),
-                    filename,
-                )
-                if os.path.isfile(candidate):
-                    return candidate
+                dir_path = os.path.expanduser(directory)
+                if not os.path.isdir(dir_path):
+                    continue
+
+                try:
+                    models = [f for f in os.listdir(dir_path) if f.lower().endswith(".onnx")]
+                except OSError:
+                    continue
+
+                # Match language alias or model name
+                for m in models:
+                    m_lower = m.lower()
+                    if requested in m_lower:
+                        return os.path.join(dir_path, m)
+                    if requested in ["hi", "hindi", "hi_in"] and m_lower.startswith("hi_in"):
+                        return os.path.join(dir_path, m)
+                    if requested in ["en", "english", "en_us"] and m_lower.startswith("en_"):
+                        return os.path.join(dir_path, m)
 
         return self.piper_model
 
     @staticmethod
     def _piper_length_scale(speed: float) -> float:
-        """
-        Piper's length_scale is inverse to perceived speed:
-          lower = faster
-          higher = slower
-
-        Keep it in a conservative range so speech remains natural.
-        """
         try:
             speed = float(speed)
         except (TypeError, ValueError):
@@ -501,40 +345,18 @@ class RobotOperatorSystem:
             speed = DEFAULT_SPEED
 
         speed = max(0.70, min(1.35, speed))
+        return max(0.70, min(1.35, round(1.0 / speed, 3)))
 
-        return max(
-            0.70,
-            min(1.35, round(1.0 / speed, 3)),
-        )
-
-    def _synthesize(self, text, model, speed=1.0, pitch=None, output_path=None):
-        """Run Piper and produce a WAV file."""
-
+    def _synthesize(self, text: str, model: str, speed: float = 1.0, pitch: int = None) -> str:
         if not self.piper_binary:
-            raise RuntimeError(
-                "Piper is not installed or could not be found. "
-                "Set PIPER_BINARY or install the piper executable."
-            )
-
+            raise RuntimeError("Piper executable not found.")
         if not model or not os.path.isfile(model):
-            raise RuntimeError(
-                "No Piper voice model was found. "
-                "Set PIPER_MODEL to a valid .onnx voice model."
-            )
+            raise RuntimeError("No valid Piper .onnx model found.")
 
-        if output_path is None:
-            fd, output_path = tempfile.mkstemp(
-                prefix="helio_tts_",
-                suffix=".wav",
-            )
-            os.close(fd)
+        fd, output_path = tempfile.mkstemp(prefix="robot_tts_", suffix=".wav")
+        os.close(fd)
 
         length_scale = self._piper_length_scale(speed)
-
-        # Pitch is intentionally not forced into Piper. Piper's voice model
-        # determines natural pitch. Arbitrary pitch shifting tends to make
-        # neural speech less human. The parameter remains accepted for API
-        # compatibility.
         command = [
             self.piper_binary,
             "--model",
@@ -545,12 +367,7 @@ class RobotOperatorSystem:
             str(length_scale),
         ]
 
-        print(
-            f"[TTS] Synthesizing with neural voice "
-            f"{os.path.basename(model)} "
-            f"(speed={speed}, length_scale={length_scale})"
-        )
-
+        print(f"[TTS] Synthesizing speech with {os.path.basename(model)}...")
         result = subprocess.run(
             command,
             input=text,
@@ -561,38 +378,21 @@ class RobotOperatorSystem:
 
         if result.returncode != 0:
             error = (result.stderr or result.stdout or "").strip()
-            raise RuntimeError(
-                f"Piper synthesis failed"
-                + (f": {error}" if error else "")
-            )
-
-        if not os.path.isfile(output_path):
-            raise RuntimeError(
-                "Piper returned successfully but did not create the WAV file."
-            )
+            raise RuntimeError(f"Piper synthesis failed: {error}")
 
         return output_path
 
-    # -----------------------------------------------------------------------
-    # Playback
-    # -----------------------------------------------------------------------
-
     def _play_audio_worker(self, wav_path: str):
         process = None
-
         try:
             self._set_speaking_state(True)
 
-            # paplay is retained because the original system already uses
-            # PulseAudio/PipeWire Bluetooth playback.
             if shutil.which("paplay"):
                 command = ["paplay", wav_path]
             elif shutil.which("aplay"):
                 command = ["aplay", "-q", wav_path]
             else:
-                raise RuntimeError(
-                    "Neither paplay nor aplay is installed."
-                )
+                raise RuntimeError("Audio player (paplay/aplay) not found.")
 
             process = subprocess.Popen(
                 command,
@@ -606,7 +406,7 @@ class RobotOperatorSystem:
             process.wait()
 
             with self.lock:
-                was_current = self.current_process == process
+                was_current = (self.current_process == process)
                 if was_current:
                     self.current_process = None
 
@@ -614,64 +414,32 @@ class RobotOperatorSystem:
                 self._set_speaking_state(False)
 
         except Exception as exc:
-            print(f"[TTS] Audio playback failed: {exc}")
-
+            print(f"[TTS] Playback error: {exc}")
             with self.lock:
                 if self.current_process == process:
                     self.current_process = None
-
             self._set_speaking_state(False)
-
         finally:
-            try:
-                if os.path.exists(wav_path):
+            if os.path.exists(wav_path):
+                try:
                     os.remove(wav_path)
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-    # -----------------------------------------------------------------------
-    # Public speech interface
-    # -----------------------------------------------------------------------
-
-    def speak(
-        self,
-        text: str,
-        voice: str = None,
-        speed: float = None,
-        pitch: int = None,
-    ):
-        """
-        Public speech method.
-
-        Signature intentionally matches the previous Festival implementation.
-        """
-
+    def speak(self, text: str, voice: str = None, speed: float = None, pitch: int = None) -> bool:
         text = self._prepare_text(text)
-
         if not text:
-            print("[TTS] Ignoring empty speech request.")
             return False
 
-        # New speech always preempts old speech.
         self.stop_speech()
 
-        selected_speed = (
-            self.speed
-            if speed is None
-            else speed
-        )
-
+        selected_speed = self.speed if speed is None else speed
         model = self._resolve_model(voice)
 
         if not model:
-            print(
-                "[TTS] ERROR: No neural voice model available. "
-                "Speech request was not played."
-            )
+            print("[TTS] ERROR: No neural voice model available.")
             return False
 
-        # Synthesis is protected so two simultaneous requests do not corrupt
-        # temporary audio files or overload the local TTS engine.
         try:
             with self.synthesis_lock:
                 wav_path = self._synthesize(
@@ -690,42 +458,30 @@ class RobotOperatorSystem:
             args=(wav_path,),
             daemon=True,
         )
-
         self.playback_thread.start()
         return True
 
-    # -----------------------------------------------------------------------
-    # Shutdown
-    # -----------------------------------------------------------------------
-
     def cleanup(self):
         print("[System] Shutting down Robot Operator System...")
-
         self.stop_speech()
-
         if self.gpio_available:
             try:
                 GPIO.output(self.status_pin, GPIO.LOW)
                 GPIO.cleanup()
             except Exception:
                 pass
+        print("[System] Shutdown complete.")
 
-        print("[System] Robot Operator System shutdown complete.")
 
-
-# ---------------------------------------------------------------------------
 # Global system instance
-# ---------------------------------------------------------------------------
-
 robot_system = RobotOperatorSystem()
 
 
 # ---------------------------------------------------------------------------
-# HTTP server
+# HTTP Server Handler
 # ---------------------------------------------------------------------------
 
 class RobotRequestHandler(BaseHTTPRequestHandler):
-
     def do_POST(self):
         if self.path not in ["/announce", "/speak"]:
             self.send_response(404)
@@ -733,13 +489,7 @@ class RobotRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            content_length = int(
-                self.headers.get("Content-Length", "0")
-            )
-
-            if content_length <= 0:
-                raise ValueError("Empty request body")
-
+            content_length = int(self.headers.get("Content-Length", "0"))
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode("utf-8"))
 
@@ -752,11 +502,7 @@ class RobotRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(
-                    json.dumps({
-                        "error": "Missing 'text' parameter"
-                    }).encode("utf-8")
-                )
+                self.wfile.write(json.dumps({"error": "Missing 'text' parameter"}).encode("utf-8"))
                 return
 
             accepted = robot_system.speak(
@@ -766,77 +512,40 @@ class RobotRequestHandler(BaseHTTPRequestHandler):
                 pitch=pitch,
             )
 
-            if accepted:
-                self.send_response(200)
-                response = {
-                    "status": "accepted",
-                    "message": "Speech processing",
-                }
-            else:
-                self.send_response(503)
-                response = {
-                    "status": "error",
-                    "message": "TTS engine is unavailable",
-                }
-
+            status_code = 200 if accepted else 503
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(
-                json.dumps(response).encode("utf-8")
-            )
-
-        except json.JSONDecodeError:
-            self.send_response(400)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(
-                json.dumps({
-                    "error": "Invalid JSON request"
-                }).encode("utf-8")
-            )
+            self.wfile.write(json.dumps({
+                "status": "accepted" if accepted else "error",
+                "message": "Speech processing" if accepted else "TTS unavailable"
+            }).encode("utf-8"))
 
         except Exception as exc:
-            print(f"[HTTP] Request error: {exc}")
-
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(
-                json.dumps({
-                    "error": str(exc)
-                }).encode("utf-8")
-            )
+            self.wfile.write(json.dumps({"error": str(exc)}).encode("utf-8"))
 
     def log_message(self, format, *args):
-        # Preserve quiet HTTP logging.
         return
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Main Entry Point
 # ---------------------------------------------------------------------------
 
 def main():
     server_address = ("0.0.0.0", SERVER_PORT)
-
-    httpd = HTTPServer(
-        server_address,
-        RobotRequestHandler,
-    )
-
-    print(
-        f"[System] Robot Operator HTTP service listening "
-        f"on port {SERVER_PORT}..."
-    )
+    httpd = HTTPServer(server_address, RobotRequestHandler)
+    print(f"[System] Robot Operator HTTP service listening on port {SERVER_PORT}...")
 
     def signal_handler(sig, frame):
         print("\n[System] Stopping service...")
-
         try:
             robot_system.cleanup()
         finally:
             httpd.server_close()
-
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
