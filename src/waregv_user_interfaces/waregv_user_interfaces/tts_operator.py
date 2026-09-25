@@ -5,7 +5,7 @@ Robot Operator System - Single File Solution
 Features:
 - Persistent Bluetooth speaker connection & auto-reconnect.
 - Interrupted Festival Text-to-Speech (preempts current speech on new call).
-- Configurable TTS settings (voice, speed, pitch).
+- Robust voice handling with safe fallback if requested Festival voice is missing.
 - GPIO hardware pin status output (HIGH when speaking, LOW when idle).
 - External service notification (`profile_setting`) sending "speaking" / "not speaking".
 - Built-in HTTP server listening for TTS requests.
@@ -20,6 +20,7 @@ import signal
 import threading
 import subprocess
 import urllib.request
+import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # --- Hardware / Raspberry Pi GPIO Setup ---
@@ -31,9 +32,9 @@ except ImportError:
 
 
 # --- Configuration Defaults ---
-BT_MAC_ADDRESS = "41:42:5A:7C:16:99"                     # Replace with your Bluetooth MAC
+BT_MAC_ADDRESS = "41:42:5A:7C:16:99"                       # Replace with your actual speaker MAC address
 PROFILE_SERVICE_URL = "http://localhost:8000/profile_setting"  # Target profile service
-STATUS_GPIO_PIN = 26                                     # BCM Pin for speaking state
+STATUS_GPIO_PIN = 17                                     # BCM Pin for speaking state
 SERVER_PORT = 8080                                       # HTTP Server port
 DEFAULT_VOICE = "kal_diphone"
 DEFAULT_SPEED = 1.0
@@ -61,12 +62,16 @@ class RobotOperatorSystem:
 
         # Configure GPIO hardware pin
         if GPIO_AVAILABLE:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.status_pin, GPIO.OUT)
-            GPIO.output(self.status_pin, GPIO.LOW)
-            print(f"[GPIO] Status pin configured on BCM GPIO {self.status_pin}.")
+            try:
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(self.status_pin, GPIO.OUT)
+                GPIO.output(self.status_pin, GPIO.LOW)
+                print(f"[GPIO] Status pin initialized on BCM GPIO {self.status_pin}.")
+            except Exception as e:
+                print(f"[GPIO] Failed to initialize GPIO: {e}. Running without hardware signaling.")
+                GPIO_AVAILABLE = False
         else:
-            print("[GPIO] RPi.GPIO library not found. Hardware pin signaling disabled.")
+            print("[GPIO] RPi.GPIO library not available. Hardware pin signaling disabled.")
 
         # Start persistent Bluetooth monitor thread
         self.bt_thread = threading.Thread(target=self._bluetooth_keepalive, daemon=True)
@@ -77,25 +82,29 @@ class RobotOperatorSystem:
         print(f"[Bluetooth] Auto-reconnect thread active for device {self.mac_address}.")
         while True:
             try:
-                info = subprocess.check_output(
+                result = subprocess.run(
                     ["bluetoothctl", "info", self.mac_address],
-                    stderr=subprocess.DEVNULL,
-                    text=True,
+                    capture_output=True,
+                    text=True
                 )
-                if "Connected: yes" not in info:
-                    print(f"[Bluetooth] Device disconnected. Attempting reconnect to {self.mac_address}...")
+
+                if result.returncode != 0:
+                    # Device is either not paired yet or MAC is invalid
+                    pass
+                elif "Connected: yes" not in result.stdout:
+                    print(f"[Bluetooth] Device disconnected. Reconnecting to {self.mac_address}...")
                     subprocess.run(
                         ["bluetoothctl", "connect", self.mac_address],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True
                     )
             except Exception as e:
-                print(f"[Bluetooth] Error querying device status: {e}")
+                print(f"[Bluetooth] Keepalive exception: {e}")
 
-            time.sleep(4)  # Polling check interval
+            time.sleep(4)
 
     def _notify_profile_service(self, status: str):
-        """Sends HTTP POST payload to the profile_setting service."""
+        """Sends HTTP POST payload to the profile_setting service safely."""
         print(f"[Service Call] Notifying profile_setting -> status: '{status}'")
         try:
             payload = json.dumps({"status": status, "device": "robot_operator"}).encode("utf-8")
@@ -105,8 +114,10 @@ class RobotOperatorSystem:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=1.5) as response:
+            with urllib.request.urlopen(req, timeout=1.0) as response:
                 pass
+        except urllib.error.URLError:
+            print(f"[Service Call] Service at {self.profile_service_url} is unreachable (offline).")
         except Exception as e:
             print(f"[Service Call] Failed to call profile_setting: {e}")
 
@@ -117,7 +128,10 @@ class RobotOperatorSystem:
 
             # Hardware Pin update
             if GPIO_AVAILABLE:
-                GPIO.output(self.status_pin, GPIO.HIGH if speaking else GPIO.LOW)
+                try:
+                    GPIO.output(self.status_pin, GPIO.HIGH if speaking else GPIO.LOW)
+                except Exception as e:
+                    print(f"[GPIO] Output update failed: {e}")
 
         # Notify profile_setting service asynchronously
         status_str = "speaking" if speaking else "not speaking"
@@ -137,10 +151,9 @@ class RobotOperatorSystem:
 
     def _play_audio_worker(self, wav_path: str):
         """Worker thread to run audio output via paplay and emit 'not speaking' upon finish."""
-        # Update status to 'speaking'
         self._set_speaking_state(True)
 
-        # paplay outputs to default PulseAudio / PipeWire Bluetooth sink
+        # paplay outputs audio to default sound device / Bluetooth sink
         proc = subprocess.Popen(
             ["paplay", wav_path],
             stdout=subprocess.DEVNULL,
@@ -150,11 +163,10 @@ class RobotOperatorSystem:
         with self.lock:
             self.current_process = proc
 
-        # Wait until playback ends or process is killed
+        # Wait until playback ends or process is preempted/killed
         proc.wait()
 
         with self.lock:
-            # Only signal 'not speaking' if this exact process finished (not preempted)
             if self.current_process == proc:
                 self.current_process = None
                 is_final_speech = True
@@ -165,18 +177,20 @@ class RobotOperatorSystem:
             self._set_speaking_state(False)
 
     def speak(self, text: str, voice: str = None, speed: float = None, pitch: int = None):
-        """Synthesizes text using Festival and plays audio immediately, preempting current speech."""
-        # 1. Stop active speech if any
+        """Synthesizes text using Festival with safe voice fallback and plays audio immediately."""
         self.stop_speech()
 
         selected_voice = voice or self.default_voice
         selected_speed = speed or self.speed
-
-        # Convert speed to Festival StretchFactor
         stretch_factor = round(1.0 / selected_speed, 2) if selected_speed > 0 else 1.0
 
-        # Build Festival Scheme eval script
-        scm_config = f"(voice_{selected_voice})\n(Parameter.set 'StretchFactor {stretch_factor})\n"
+        # Build Festival Scheme script with safe symbol checking for unbound voices
+        scm_config = f"""
+(if (symbol-bound? 'voice_{selected_voice})
+    (voice_{selected_voice})
+    (voice_default))
+(Parameter.set 'StretchFactor {stretch_factor})
+"""
         if pitch is not None:
             scm_config += f"(Parameter.set 'Pitch_Target {pitch})\n"
 
@@ -186,7 +200,7 @@ class RobotOperatorSystem:
         with open(scm_path, "w") as f:
             f.write(scm_config)
 
-        # 2. Synthesize audio via Festival text2wave
+        # Synthesize audio via Festival text2wave
         try:
             cmd = f"echo {shlex.quote(text)} | text2wave -eval {scm_path} -o {wav_path}"
             subprocess.run(cmd, shell=True, check=True)
@@ -194,7 +208,7 @@ class RobotOperatorSystem:
             print(f"[TTS] Synthesis failed via Festival: {e}")
             return
 
-        # 3. Spawn thread to handle audio playback life cycle
+        # Spawn worker thread for playback & preemption tracking
         self.playback_thread = threading.Thread(
             target=self._play_audio_worker,
             args=(wav_path,),
@@ -206,8 +220,11 @@ class RobotOperatorSystem:
         """Clean resource handles on shutdown."""
         self.stop_speech()
         if GPIO_AVAILABLE:
-            GPIO.output(self.status_pin, GPIO.LOW)
-            GPIO.cleanup()
+            try:
+                GPIO.output(self.status_pin, GPIO.LOW)
+                GPIO.cleanup()
+            except Exception:
+                pass
         print("[System] Robot Operator System shutdown complete.")
 
 
@@ -230,13 +247,12 @@ class RobotRequestHandler(BaseHTTPRequestHandler):
                 pitch = data.get("pitch", None)
 
                 if text:
-                    # Triggers TTS speech (interrupting any running playback)
                     robot_system.speak(text=text, voice=voice, speed=speed, pitch=pitch)
 
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
-                    self.wfile.write(json.dumps({"status": "accepted", "message": "Speech playing"}).encode())
+                    self.wfile.write(json.dumps({"status": "accepted", "message": "Speech processing"}).encode())
                 else:
                     self.send_response(400)
                     self.end_headers()
@@ -251,7 +267,7 @@ class RobotRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def log_message(self, format, *args):
-        # Suppress standard HTTP request logging for cleaner terminal output
+        # Suppress standard HTTP request logging
         return
 
 
@@ -261,7 +277,6 @@ def main():
     httpd = HTTPServer(server_address, RobotRequestHandler)
     print(f"[System] Robot Operator HTTP service listening on port {SERVER_PORT}...")
 
-    # Graceful shutdown signal handling
     def signal_handler(sig, frame):
         print("\n[System] Stopping service...")
         robot_system.cleanup()
