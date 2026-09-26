@@ -45,7 +45,7 @@ class ArduinoNavBridge(Node):
         )
 
         # Let the hardware know the node is alive
-        self.send_state("WareGV Cutie", "Bridge initialized", "")
+        self.send_state("WareGV", "Bridge initialized", "")
 
     def status_cb(self, msg: GoalStatusArray):
         if not msg.status_list:
