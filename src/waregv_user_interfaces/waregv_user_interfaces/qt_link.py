@@ -8,7 +8,7 @@ SERIAL = None
 PORT = "/dev/arduino_nano"
 BAUD = 115200
 
-def init(serial,port,baudrate):
+def init(port,baudrate):
         global SERIAL,PORT,BAUD
         
         PORT = port
