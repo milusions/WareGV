@@ -2,19 +2,40 @@
 
 import json
 import serial
+import waregv_user_interfaces.qt_link as qt_link
 import rclpy
 from rclpy.node import Node
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import PoseStamped
 
-# Map ROS Nav2 action states to clean JSON profiles
+# Map ROS Nav2 action states to clean JSON layout commands
 STATUS_MAP = {
-    GoalStatus.STATUS_ACCEPTED:  {"profile": "goal_received", "desc": "Goal accepted"},
-    GoalStatus.STATUS_EXECUTING: {"profile": "navigating",    "desc": "Navigating to destination"},
-    GoalStatus.STATUS_SUCCEEDED: {"profile": "goal_reached",  "desc": "Destination reached"},
-    GoalStatus.STATUS_ABORTED:   {"profile": "nav_error",     "desc": "Navigation aborted"},
-    GoalStatus.STATUS_CANCELED:  {"profile": "nav_error",     "desc": "Navigation canceled"}
+    GoalStatus.STATUS_ACCEPTED:  {
+        "title": "GOAL ACCEPTED",
+        "subtitle": "Preparing route...",
+        "action": "spinner"
+    },
+    GoalStatus.STATUS_EXECUTING: {
+        "title": "NAVIGATING",
+        "subtitle": "En route to destination",
+        "action": "loader"
+    },
+    GoalStatus.STATUS_SUCCEEDED: {
+        "title": "ARRIVED",
+        "subtitle": "Destination reached",
+        "action": ""
+    },
+    GoalStatus.STATUS_ABORTED:   {
+        "title": "NAV ERROR",
+        "subtitle": "Navigation aborted",
+        "action": ""
+    },
+    GoalStatus.STATUS_CANCELED:  {
+        "title": "NAV ERROR",
+        "subtitle": "Navigation canceled",
+        "action": ""
+    }
 }
 
 class ArduinoNavBridge(Node):
@@ -28,14 +49,8 @@ class ArduinoNavBridge(Node):
         port = self.get_parameter('port').value
         baud = self.get_parameter('baudrate').value
 
-        # Connect to Arduino
-        try:
-            self.ser = serial.Serial(port, baud, timeout=0.1)
-            self.get_logger().info(f"Connected to Arduino on {port}")
-        except serial.SerialException as e:
-            self.get_logger().error(f"Failed to open port {port}: {e}")
-            self.ser = None
-
+        qt_link.init(port, baud)
+        
         # State tracking
         self.last_status = None
 
@@ -48,18 +63,11 @@ class ArduinoNavBridge(Node):
         )
 
         # Let the hardware know the node is alive
-        self.send_to_arduino({"profile": "idle", "desc": "Bridge initialized"})
-
-    def send_to_arduino(self, payload: dict):
-        """Helper to safely push JSON data over serial line."""
-        if not self.ser or not self.ser.is_open:
-            return
-
-        try:
-            packet = json.dumps(payload) + '\n'
-            self.ser.write(packet.encode('utf-8'))
-        except Exception as e:
-            self.get_logger().error(f"Serial write failed: {e}")
+        qt_link.send_to_qt({
+            "title": "READY",
+            "subtitle": "Bridge initialized",
+            "action": ""
+        })
 
     def status_cb(self, msg: GoalStatusArray):
         if not msg.status_list:
@@ -76,7 +84,7 @@ class ArduinoNavBridge(Node):
 
         # Dispatch match if tracked in our lookup dictionary
         if status in STATUS_MAP:
-            self.send_to_arduino(STATUS_MAP[status])
+            qt_link.send_to_qt(STATUS_MAP[status])
 
 
 def main(args=None):
@@ -87,8 +95,6 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        if node.ser and node.ser.is_open:
-            node.ser.close()
         node.destroy_node()
         rclpy.shutdown()
 

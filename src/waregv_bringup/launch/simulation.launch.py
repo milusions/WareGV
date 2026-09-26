@@ -124,12 +124,7 @@ def generate_launch_description():
             ),
         ]
     )
-    camera_streamer = Node(
-                package="waregv_hardware",
-                executable="camera_streamer",
-                parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
-                output="screen",
-            )
+   
     twist_mux_node_config_filepath = os.path.join(
         waregv_bringup_dir, "config", "twist_mux.yaml"
     )
@@ -261,7 +256,6 @@ def generate_launch_description():
             gz_spawn_entity,
             controller_spawners,
             twist_mux_node,
-            camera_streamer,
             waregv_odometry,
             waregv_controller,
             waregv_mapping,
