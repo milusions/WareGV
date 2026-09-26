@@ -842,7 +842,7 @@ class WareGVBrigeNode(Node):
         name: str,
     ):
         """
-        Package the REAL map files.
+        Package the REAL map files and include aruco.json if present.
 
         Unlike the previous implementation, this function NEVER creates
         a fake YAML or fake PGM.
@@ -907,6 +907,14 @@ class WareGVBrigeNode(Node):
                         candidate.name,
                         candidate.read_bytes(),
                     )
+
+            # Include aruco.json if available in the workspace data directory.
+            aruco_json_path = pathlib.Path.home() / "waregv" / "waregv_ws" / "data" / "aruco.json"
+            if aruco_json_path.exists() and aruco_json_path.is_file():
+                zip_file.writestr(
+                    aruco_json_path.name,
+                    aruco_json_path.read_bytes(),
+                )
 
         archive.seek(0)
 
@@ -1254,7 +1262,7 @@ async def abort_mission():
 @app.get("/map/save")
 async def save_map(name: str = "map"):
     """
-    Download an existing real map.
+    Download an existing real map along with aruco.json if present.
 
     No synthetic YAML or PGM is generated.
     """
