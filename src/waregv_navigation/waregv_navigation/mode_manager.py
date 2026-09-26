@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import asyncio
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
@@ -45,7 +46,7 @@ class ModeManager(Node):
         self.get_logger().info("Mode Manager Initialized. Change mode via: ros2 param set /mode_manager mode <mode_name>")
 
     async def ros_sleep(self, seconds: float):
-        """ROS2-native async sleep compatible with rclpy MultiThreadedExecutor."""
+        """ROS 2-native async sleep compatible with rclpy MultiThreadedExecutor."""
         future = Future()
         timer = self.create_timer(
             seconds, 
@@ -105,8 +106,13 @@ class ModeManager(Node):
         request = ChangeState.Request()
         request.transition.id = transition_id
         try:
-            response = await client.call_async(request)
+            # Wrap call with timeout to prevent hanging on missing TF frames
+            future = client.call_async(request)
+            response = await asyncio.wait_for(future, timeout=5.0)
             return response.success
+        except asyncio.TimeoutError:
+            self.get_logger().error(f"Timeout changing state for node '{node_name}'. Ensure required TF frames exist.")
+            return False
         except Exception as e:
             self.get_logger().error(f"Failed to transition state for {node_name}: {e}")
             return False
@@ -156,7 +162,7 @@ class ModeManager(Node):
         for node in map_providers:
             await self.transition_node_to(node, 'active')
 
-        # Step 3: Wait briefly via ROS2 timer so TF frame 'map' becomes active
+        # Step 3: Wait briefly via ROS 2 timer so TF frame 'map' settles
         if map_providers:
             self.get_logger().info("Waiting 2.0s for TF map frame to settle...")
             await self.ros_sleep(2.0)
