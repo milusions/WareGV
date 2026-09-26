@@ -201,28 +201,7 @@ def generate_launch_description():
             scoped=True,
             forwarding=True,
         )
-    
-    waregv_mapping_launch_file_path = os.path.join(
-            get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
-        )
-    waregv_mapping = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
-            launch_arguments={"use_sim_time": use_sim_time}.items(),
-        )
-    
-    waregv_navigation_launch_file_path = os.path.join(
-            get_package_share_directory("waregv_navigation"),
-            "launch",
-            "navigation.launch.py",
-        )
-    waregv_navigation = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
-            launch_arguments={
-                "use_sim_time": use_sim_time,
-                "max_linear_velocity": max_linear_velocity_conf,
-                "max_angular_velocity": max_angular_velocity_conf,
-            }.items(),
-        )
+   
     waregv_suite_launch_file_path = os.path.join(
                 get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
             )
@@ -239,6 +218,13 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(waregv_user_interfaces_launch_file_path),
                 launch_arguments={"use_sim_time": use_sim_time}.items(),
             )
+    waregv_system_bringup_launch_file_path = os.path.join(
+                              get_package_share_directory("waregv_bringup"), "launch", "system_bringup.launch.py"
+                          )
+    waregv_system_bringup = IncludeLaunchDescription(
+                              PythonLaunchDescriptionSource(waregv_system_bringup_launch_file_path),
+                              launch_arguments={"use_sim_time": use_sim_time}.items(),
+                          )
     
     return LaunchDescription(
         [
@@ -259,8 +245,7 @@ def generate_launch_description():
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
-            waregv_mapping,
-            # waregv_navigation,
-            waregv_suite
+            waregv_suite,
+            # waregv_system_bringup
         ]
     )

@@ -39,6 +39,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            
+            "mode_manager=waregv_navigation.mode_manager:main",
+            "auto_mode_switcher=waregv_navigation.auto_mode_switcher:main"
         
         ],
     },

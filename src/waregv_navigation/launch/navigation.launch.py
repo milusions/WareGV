@@ -8,22 +8,20 @@ from launch_ros.actions import Node
 from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description():
-    # 1. Get the path to the package directory to locate the params file
     waregv_navigation_dir = get_package_share_directory("waregv_navigation")
-    
-    # 2. Setup Launch Configurations
+
     use_sim_time = LaunchConfiguration('use_sim_time')
     params_file = LaunchConfiguration('params_file')
     max_linear_velocity = LaunchConfiguration('max_linear_velocity')
     max_angular_velocity = LaunchConfiguration('max_angular_velocity')
-    
-    # 3. Declare Launch Arguments
+    map_yaml_file = LaunchConfiguration('map_yaml_file')
+
     use_sim_time_arg = DeclareLaunchArgument(
-        name="use_sim_time", 
+        name="use_sim_time",
         default_value='false',
         description='Use simulation (Gazebo) clock if true'
     )
-    
+
     params_file_arg = DeclareLaunchArgument(
         name='params_file',
         default_value=os.path.join(waregv_navigation_dir, 'config', 'nav2_params.yaml'),
@@ -42,12 +40,18 @@ def generate_launch_description():
         description='Maximum angular/rotational velocity to override in Nav2 Params'
     )
 
-    # 4. Create the RewrittenYaml parameter substitution logic
+    map_yaml_file_arg = DeclareLaunchArgument(
+        name='map_yaml_file',
+        default_value=os.path.join(waregv_navigation_dir, 'maps', 'warehouse_map.yaml'),
+        description='Full path to static map yaml file'
+    )
+
     param_substitutions = {
         'max_linear_vel': max_linear_velocity,
         'desired_linear_vel': max_linear_velocity,
         'max_angular_vel': max_angular_velocity,
         'max_rotational_vel': max_angular_velocity,
+        'yaml_filename': map_yaml_file,
     }
 
     configured_params = RewrittenYaml(
@@ -57,13 +61,22 @@ def generate_launch_description():
         convert_types=True
     )
 
-    # 5. Define the Lifecycle Nodes required for basic Navigation
-    lifecycle_nodes = ['controller_server',
-                       'planner_server',
-                       'behavior_server',
-                       'bt_navigator']
+    map_server = Node(
+        package='nav2_map_server',
+        executable='map_server',
+        name='map_server',
+        output='screen',
+        parameters=[configured_params, {'use_sim_time': use_sim_time}]
+    )
 
-    # Node A: Controller Server
+    amcl = Node(
+        package='nav2_amcl',
+        executable='amcl',
+        name='amcl',
+        output='screen',
+        parameters=[configured_params, {'use_sim_time': use_sim_time}]
+    )
+
     controller_server = Node(
         package='nav2_controller',
         executable='controller_server',
@@ -72,7 +85,6 @@ def generate_launch_description():
         parameters=[configured_params, {'use_sim_time': use_sim_time}]
     )
 
-    # Node B: Planner Server
     planner_server = Node(
         package='nav2_planner',
         executable='planner_server',
@@ -81,7 +93,6 @@ def generate_launch_description():
         parameters=[configured_params, {'use_sim_time': use_sim_time}]
     )
 
-    # Node C: Behavior Server 
     behavior_server = Node(
         package='nav2_behaviors',
         executable='behavior_server',
@@ -90,7 +101,6 @@ def generate_launch_description():
         parameters=[configured_params, {'use_sim_time': use_sim_time}]
     )
 
-    # Node D: Behavior Tree Navigator
     bt_navigator = Node(
         package='nav2_bt_navigator',
         executable='bt_navigator',
@@ -99,28 +109,16 @@ def generate_launch_description():
         parameters=[configured_params, {'use_sim_time': use_sim_time}]
     )
 
-    # 6. Define the Lifecycle Manager Node
-    lifecycle_manager = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_navigation',
-        output='screen',
-        parameters=[
-            {'use_sim_time': use_sim_time},
-            {'autostart': True},
-            {'node_names': lifecycle_nodes}
-        ]
-    )
-
-    # 7. Return the LaunchDescription object
     return LaunchDescription([
         use_sim_time_arg,
         params_file_arg,
         max_linear_velocity_arg,
         max_angular_velocity_arg,
+        map_yaml_file_arg,
+        map_server,
+        amcl,
         controller_server,
         planner_server,
         behavior_server,
         bt_navigator,
-        lifecycle_manager
     ])
