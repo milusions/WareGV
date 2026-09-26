@@ -20,8 +20,8 @@ while ! ip link show up | grep -q "lo"; do
 done
 
 WORLD_NAME="small_warehouse"
-MAX_LINEAR_VELOCITY="0.11"
-MAX_ANGULAR_VELOCITY="0.5"
+MAX_LINEAR_VELOCITY="0.3"
+MAX_ANGULAR_VELOCITY="0.35"
 WHEEL_RADIUS="0.035"
 track_width="0.168"
 MODEL="waregv.urdf.xacro"

@@ -137,6 +137,7 @@ def generate_launch_description():
         remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
     )
 
+ 
     waregv_odometry_launch_file_path = os.path.join(
             get_package_share_directory("waregv_odometry"),
             "launch",
@@ -259,7 +260,7 @@ def generate_launch_description():
             waregv_odometry,
             waregv_controller,
             waregv_mapping,
-            waregv_navigation,
+            # waregv_navigation,
             waregv_suite
         ]
     )

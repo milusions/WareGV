@@ -19,7 +19,7 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
-MAX_LINEAR_VELOCITY="0.11"
+MAX_LINEAR_VELOCITY="0.3"
 MAX_ANGULAR_VELOCITY="0.35"
 WHEEL_RADIUS="0.036"
 track_width="0.192"

@@ -96,7 +96,7 @@ class HelioStatePayload(BaseModel):
 # ROS 2 REST bridge
 # =========================================================
 
-class BearGVBridgeNode(Node):
+class WareGVBrigeNode(Node):
     """
     REST <-> ROS 2 bridge for the WareGV rover.
 
@@ -942,7 +942,7 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-ros_node: Optional[BearGVBridgeNode] = None
+ros_node: Optional[WareGVBrigeNode] = None
 
 
 # =========================================================
@@ -1455,7 +1455,7 @@ def main():
 
     rclpy.init()
 
-    ros_node = BearGVBridgeNode()
+    ros_node = WareGVBrigeNode()
 
     ros_thread = threading.Thread(
         target=run_ros2_node,
