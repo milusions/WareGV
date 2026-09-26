@@ -22,7 +22,7 @@ def init(port,baudrate):
             
         send_to_qt({"title": "Bridge initialized","subtitle":"","action":""})
 
-def send_to_qt(self, payload: dict):
+def send_to_qt(payload: dict):
         """Helper to safely push JSON data over serial line."""
         if not SERIAL or not SERIAL.is_open:
             return
