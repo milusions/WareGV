@@ -36,5 +36,5 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         nav2_status_node,
-        sound_player
+        # sound_player
     ])

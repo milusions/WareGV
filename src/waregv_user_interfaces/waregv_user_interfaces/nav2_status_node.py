@@ -182,12 +182,13 @@ class ArduinoNavBridge(Node):
 
     def publish_media(self, filename: str):
         # Prevent spamming identical media play commands repeatedly
-        if filename != self.last_sent_media:
-            msg = String()
-            msg.data = filename
-            self.media_pub.publish(msg)
-            self.last_sent_media = filename
-            self.get_logger().info(f"Triggered media playback for state: {filename}")
+        pass
+        # if filename != self.last_sent_media:
+        #     msg = String()
+        #     msg.data = filename
+        #     self.media_pub.publish(msg)
+        #     self.last_sent_media = filename
+        #     self.get_logger().info(f"Triggered media playback for state: {filename}")
 
 def main(args=None):
     rclpy.init(args=args)
