@@ -1,10 +1,10 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 5.0              # Lowered from 20.0 to reliably meet processing deadlines
+    frequency: 20.0              # was 30; matches the Nav2 controller rate
     sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
-    predict_to_current_time: false # Disabled to reduce heavy computational overhead and queue delays
+    predict_to_current_time: true
     transform_timeout: 0.1
     print_diagnostics: false
 
@@ -35,4 +35,4 @@ ekf_filter_node:
     imu0_queue_size: 10
     imu0_differential: false
     imu0_remove_gravitational_acceleration: false
-    imu0_twist_rejection_threshold: 4.0
+    imu0_twist_rejection_threshold: 6.0
