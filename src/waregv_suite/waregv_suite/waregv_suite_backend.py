@@ -79,7 +79,8 @@ class WaypointsRequest(BaseModel):
 class ModeRequest(BaseModel):
     mode: str
     map_name: str = ""
-    # If omitted, the switcher will keep the current global state.
+    # None => keep the current global state. True/False => force it for this
+    # deployment and remember it as the new global state.
     enable_aruco: Optional[bool] = None
 
 
@@ -124,7 +125,7 @@ MODE_STEPS = {
         (12, "Starting SLAM Toolbox"),
         (20, "Waiting for /map topic"),
         (35, "Waiting for map -> base_link TF"),
-        (50, "Scanning Aruco markers"),          # only runs if enable_aruco
+        (50, "Scanning Aruco markers"),
         (65, "Saving map to disk"),
         (80, "Finalizing SLAM-only mode"),
     ],
@@ -181,6 +182,15 @@ class DeployState:
 
 
 class ModeSwitcher:
+    """
+    Kills and restarts the hardware launch stack with the requested mode.
+
+    Also accepts an enable_aruco flag. When False, the Aruco tracker,
+    its lifecycle manager, the camera streamer, and the amcl_initial_pose
+    node are not launched (their conditions in hardware.launch.py skip them).
+    The AMCL initial pose must then be set manually from the dashboard.
+    """
+
     def __init__(self, node: "WareGVBrigeNode"):
         self.node = node
         self.state = DeployState()
@@ -206,8 +216,6 @@ class ModeSwitcher:
             if not info.get("exists"):
                 raise ValueError(info.get("detail") or f"Map '{map_name}' not found.")
 
-        # Resolve the effective aruco flag: use the caller's value if given,
-        # otherwise fall back to the last-known global state.
         if enable_aruco is None:
             enable_aruco = self.node.enable_aruco
 
@@ -267,13 +275,13 @@ class ModeSwitcher:
                     pass
             self._proc = None
 
+        # Also sweep Aruco + camera_streamer so the new launch decides cleanly
+        # whether to start them.
         for name in (
             "slam_toolbox", "amcl", "controller_server", "planner_server",
             "bt_navigator", "behavior_server", "recoveries_server",
             "waypoint_follower", "map_server", "lifecycle_manager",
             "smoother_server", "velocity_smoother", "collision_monitor",
-            # Aruco + camera streamer are also killed so the new launch can
-            # cleanly decide whether to start them.
             "aruco_node", "aruco_tracker_node", "camera_streamer",
         ):
             try:
@@ -309,8 +317,11 @@ class ModeSwitcher:
             bufsize=1,
             universal_newlines=True,
         )
-        threading.Thread(target=self._pump_output,
-                         args=(self._proc,), daemon=True).start()
+        threading.Thread(
+            target=self._pump_output,
+            args=(self._proc,),
+            daemon=True,
+        ).start()
 
     def _pump_output(self, proc: subprocess.Popen):
         try:
@@ -369,12 +380,12 @@ class ModeSwitcher:
                 raise RuntimeError("Launch process exited immediately — check the log above.")
 
             for idx, (progress, text) in enumerate(steps[2:], start=2):
-                self._step(idx, text, progress)
-
-                # Skip the Aruco step if the flag is off
+                # Skip the Aruco step entirely when disabled.
                 if "aruco" in text.lower() and not enable_aruco:
                     self._log("Skipping Aruco step (enable_aruco=false)")
                     continue
+
+                self._step(idx, text, progress)
 
                 if "map topic" in text.lower():
                     if not self._wait_for_topic("/map", 25.0):
@@ -430,8 +441,7 @@ class WareGVBrigeNode(Node):
 
         self.current_mode = "slam_only"
         self.current_map = "small_warehouse"
-        # Global flag: is the Aruco stack expected to be running right now?
-        # Default True to match the launch file's default.
+        # Global flag — matches hardware.launch.py's default.
         self.enable_aruco = True
 
         self.started_at = datetime.now(timezone.utc)
@@ -439,7 +449,7 @@ class WareGVBrigeNode(Node):
         self.active_nav_goal = None
         self.active_waypoint_goal = None
 
-        # Live Aruco cache (only used when enable_aruco=true)
+        # Live Aruco cache
         self._aruco_lock = threading.Lock()
         self._latest_aruco: Dict[str, Any] = {}
 
@@ -468,10 +478,7 @@ class WareGVBrigeNode(Node):
 
         self.get_logger().info("BearGV ROS 2 REST Bridge Node Initialized.")
 
-    # =====================================================
-    # Aruco cache
-    # =====================================================
-
+    # ----- Aruco cache -----
     def _on_aruco_detections(self, msg: String):
         try:
             parsed = json.loads(msg.data) if msg.data else {}
@@ -494,10 +501,7 @@ class WareGVBrigeNode(Node):
         except Exception:
             return {}
 
-    # =====================================================
-    # Map directory handling (unchanged)
-    # =====================================================
-
+    # ----- Map directory -----
     def _candidate_map_directories(self) -> List[pathlib.Path]:
         candidates: List[pathlib.Path] = []
         env_dir = os.environ.get("WAREGV_MAP_DIRECTORY", "").strip()
@@ -651,7 +655,7 @@ class WareGVBrigeNode(Node):
                     "detail": f"YAML for map '{safe_name}' not found under "
                               f"'{self.map_directory}' or '{LOADED_MAP_DIR}'."}
         image_path = self._find_image_near(yaml_path.parent, safe_name)
-        # Does this map have an Aruco file alongside it?
+        # Does this map have a saved Aruco file?
         aruco_candidates = [
             yaml_path.parent / f"{safe_name}.json",
             LOADED_MAP_DIR / f"{safe_name}.json",
@@ -668,10 +672,7 @@ class WareGVBrigeNode(Node):
             "aruco_json": str(aruco_file) if aruco_file else None,
         }
 
-    # =====================================================
-    # Basic helpers
-    # =====================================================
-
+    # ----- Helpers -----
     def set_profile(self, profile_str: str):
         msg = String(); msg.data = profile_str
         self.profile_pub.publish(msg)
@@ -692,10 +693,7 @@ class WareGVBrigeNode(Node):
             2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)
         ))
 
-    # =====================================================
-    # Robot pose (unchanged)
-    # =====================================================
-
+    # ----- Pose -----
     def get_robot_pose(self) -> Dict[str, Any]:
         try:
             transform = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
@@ -730,10 +728,7 @@ class WareGVBrigeNode(Node):
         msg.pose.covariance[35] = 0.06853891945200942
         self.initial_pose_pub.publish(msg)
 
-    # =====================================================
-    # Nav2 goals (unchanged)
-    # =====================================================
-
+    # ----- Nav2 goals -----
     def send_navigate_to_pose_goal(self, x, y, yaw_deg):
         if not self.nav_to_pose_client.wait_for_server(timeout_sec=3.0):
             raise RuntimeError("Nav2 NavigateToPose action server unavailable.")
@@ -810,10 +805,7 @@ class WareGVBrigeNode(Node):
         self.cmd_vel_pub.publish(Twist())
         return cancelled
 
-    # =====================================================
-    # Map archive (unchanged except has_aruco info)
-    # =====================================================
-
+    # ----- Map archive -----
     def map_archive(self, name: str):
         safe_name = self._safe_map_name(name)
         if not safe_name:
@@ -831,7 +823,7 @@ class WareGVBrigeNode(Node):
                 c = yaml_path.parent / (safe_name + ext)
                 if c.exists() and c.is_file():
                     zf.writestr(c.name, c.read_bytes())
-            # Prefer a per-map aruco.json next to the map files.
+            # Prefer the per-map aruco.json; fall back to the global one.
             per_map_aruco = yaml_path.parent / f"{safe_name}.json"
             if per_map_aruco.exists() and per_map_aruco.is_file():
                 zf.writestr("aruco.json", per_map_aruco.read_bytes())
@@ -908,11 +900,15 @@ async def set_mode(req: ModeRequest):
         raise HTTPException(422, str(exc))
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
-    return {"ok": True, "mode": mode, "map_name": map_name,
-            "enable_aruco": (req.enable_aruco
-                             if req.enable_aruco is not None
-                             else ros_node.enable_aruco),
-            "status": "deploying"}
+    return {
+        "ok": True,
+        "mode": mode,
+        "map_name": map_name,
+        "enable_aruco": (req.enable_aruco
+                         if req.enable_aruco is not None
+                         else ros_node.enable_aruco),
+        "status": "deploying",
+    }
 
 
 @app.get("/system/mode")
@@ -937,7 +933,7 @@ async def get_mode_status():
 @app.get("/system/config")
 async def get_system_config():
     """Lightweight endpoint the dashboard polls to know which UI
-    features should be enabled (e.g. whether Aruco is available)."""
+    features should be enabled (mainly: is Aruco available?)."""
     if ros_node is None:
         raise HTTPException(503, "ROS node is not ready")
     return {
@@ -1090,8 +1086,8 @@ async def load_map(
     overwrite: bool = Form(False),
     bgm_file: UploadFile = File(...),
     yaml_file: UploadFile = File(...),
-    # Aruco JSON is now optional: uploads without it produce a map that
-    # has no saved tags, so the UI must fall back to manual AMCL pose.
+    # Optional now: a map without tags is legal, and the UI will then
+    # require the user to set AMCL's initial pose manually.
     aruco_file: Optional[UploadFile] = File(None),
 ):
     safe_name = WareGVBrigeNode._safe_map_name(map_name)
@@ -1109,15 +1105,14 @@ async def load_map(
 
     try:
         saved = []
-        # Always required: image + yaml
+        # Required: image + yaml
         for upload, fallback_ext in ((bgm_file, ".pgm"), (yaml_file, ".yaml")):
             dest = LOADED_MAP_DIR / f"{safe_name}{_ext(upload, fallback_ext)}"
             with dest.open("wb") as out_file:
                 shutil.copyfileobj(upload.file, out_file)
             saved.append(str(dest))
 
-        # Optional: aruco.json. If absent, remove any stale one so the UI
-        # knows this map has no tags.
+        # Optional: aruco.json. Remove any stale one if not supplied.
         aruco_dest = LOADED_MAP_DIR / f"{safe_name}.json"
         if aruco_file is not None and (aruco_file.filename or "").strip():
             with aruco_dest.open("wb") as out_file:
@@ -1158,7 +1153,9 @@ async def save_to_loaded(name: str = Form(...), overwrite: bool = Form(False)):
         image_dest = LOADED_MAP_DIR / f"{safe_name}{image_path.suffix}"
         shutil.copyfile(image_path, image_dest)
         saved.append(str(image_dest))
-        if ARUCO_JSON_PATH.exists():
+        # Only copy aruco.json if Aruco is currently enabled — otherwise
+        # this map is intentionally tag-less.
+        if ros_node.enable_aruco and ARUCO_JSON_PATH.exists():
             aruco_dest = LOADED_MAP_DIR / f"{safe_name}.json"
             shutil.copyfile(ARUCO_JSON_PATH, aruco_dest)
             saved.append(str(aruco_dest))
