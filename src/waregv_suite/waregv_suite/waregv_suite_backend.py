@@ -41,7 +41,7 @@ from tf2_ros import Buffer, TransformListener, TransformException
 # ---------------------------------------------------------
 # FastAPI
 # ---------------------------------------------------------
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -108,7 +108,7 @@ class BearGVBridgeNode(Node):
             <workspace>/src/waregv_mapping/maps/<map>/<map>.yaml
         and:
             <directory>/<map>.yaml
-      * Missing map YAMLs are NEVER fabricated.
+      * Missing map YAMLs are NEVER fabricated by the archive code.
     """
 
     def __init__(self):
@@ -521,7 +521,7 @@ class BearGVBridgeNode(Node):
         msg = String()
         msg.data = profile_str
         self.profile_pub.publish(msg)
-        
+
     def request_speech(self, text: str):
         msg = String()
         msg.data = text
@@ -834,7 +834,7 @@ class BearGVBridgeNode(Node):
         return cancelled
 
     # =====================================================
-    # Map archive
+    # Map archive (real files only)
     # =====================================================
 
     def map_archive(
@@ -844,8 +844,7 @@ class BearGVBridgeNode(Node):
         """
         Package the REAL map files.
 
-        Unlike the previous implementation, this function NEVER creates
-        a fake YAML or fake PGM.
+        This function NEVER creates a fake YAML or fake PGM.
 
         A map must contain:
             <map>.yaml / <map>.yml
@@ -911,6 +910,92 @@ class BearGVBridgeNode(Node):
         archive.seek(0)
 
         return safe_name, archive
+
+    # =====================================================
+    # Save map to disk (maps/<name>/<name>.yaml + .pgm)
+    # =====================================================
+
+    def map_exists(self, name: str) -> bool:
+        """Check whether a map folder/file already exists on disk."""
+        safe_name = self._safe_map_name(name)
+        if not safe_name:
+            return False
+
+        # Nested layout: maps/<name>/<name>.yaml
+        nested = self.map_directory / safe_name
+        if nested.is_dir() and any(
+            (nested / f"{safe_name}{ext}").exists()
+            for ext in (".yaml", ".yml")
+        ):
+            return True
+
+        # Flat layout: maps/<name>.yaml
+        return any(
+            (self.map_directory / f"{safe_name}{ext}").exists()
+            for ext in (".yaml", ".yml")
+        )
+
+    def save_map_to_disk(
+        self,
+        name: str,
+        pgm_bytes: bytes,
+        yaml_bytes: Optional[bytes] = None,
+        overwrite: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Save a map (PGM + optional YAML) into:
+            <map_directory>/<name>/<name>.pgm
+            <map_directory>/<name>/<name>.yaml
+
+        Refuses to overwrite unless ``overwrite`` is True.
+        """
+        safe_name = self._safe_map_name(name)
+        if not safe_name:
+            raise ValueError(
+                "Map name is empty or contains only invalid characters."
+            )
+
+        if self.map_exists(safe_name) and not overwrite:
+            raise FileExistsError(
+                f"Map '{safe_name}' already exists at "
+                f"'{self.map_directory}'. Choose another name or enable overwrite."
+            )
+
+        target_dir = self.map_directory / safe_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        pgm_path = target_dir / f"{safe_name}.pgm"
+        yaml_path = target_dir / f"{safe_name}.yaml"
+
+        pgm_path.write_bytes(pgm_bytes)
+
+        # If no YAML supplied, generate a minimal, valid one that
+        # references the PGM we just wrote. This is a *real* file,
+        # usable by Nav2.
+        if yaml_bytes is None:
+            yaml_text = (
+                f"image: {safe_name}.pgm\n"
+                f"resolution: 0.050000\n"
+                f"origin: [0.000000, 0.000000, 0.000000]\n"
+                f"negate: 0\n"
+                f"occupied_thresh: 0.65\n"
+                f"free_thresh: 0.196\n"
+            )
+            yaml_path.write_text(yaml_text, encoding="utf-8")
+        else:
+            yaml_path.write_bytes(yaml_bytes)
+
+        self.get_logger().info(
+            f"Saved map '{safe_name}' to {target_dir}"
+        )
+
+        return {
+            "ok": True,
+            "name": safe_name,
+            "directory": str(target_dir),
+            "pgm": str(pgm_path),
+            "yaml": str(yaml_path),
+        }
 
 
 # =========================================================
@@ -1248,13 +1333,13 @@ async def abort_mission():
 
 
 # =========================================================
-# Map download
+# Map download (archive of an existing map)
 # =========================================================
 
 @app.get("/map/save")
 async def save_map(name: str = "map"):
     """
-    Download an existing real map.
+    Download an existing real map as a .zip.
 
     No synthetic YAML or PGM is generated.
     """
@@ -1293,6 +1378,132 @@ async def save_map(name: str = "map"):
 
 
 # =========================================================
+# Map existence check
+# =========================================================
+
+@app.get("/map/exists")
+async def map_exists(name: str):
+    """Check whether a map name is already taken on disk."""
+    if ros_node is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ROS node is not ready",
+        )
+
+    return {
+        "name": ros_node._safe_map_name(name),
+        "exists": ros_node.map_exists(name),
+    }
+
+
+# =========================================================
+# Save map to disk (with name from the UI)
+# =========================================================
+
+@app.post("/map/save_to_disk")
+async def save_map_to_disk(
+    name: str = Form(...),
+    overwrite: bool = Form(False),
+    pgm: UploadFile = File(...),
+    yaml: Optional[UploadFile] = File(None),
+):
+    """
+    Save a map into the mapping package's maps folder as:
+        maps/<name>/<name>.pgm
+        maps/<name>/<name>.yaml
+
+    The UI can send a PGM captured from the live map, plus an optional
+    YAML. If no YAML is supplied, one is generated that references the PGM.
+    """
+    if ros_node is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ROS node is not ready",
+        )
+
+    try:
+        pgm_bytes = await pgm.read()
+        yaml_bytes = await yaml.read() if yaml is not None else None
+
+        result = ros_node.save_map_to_disk(
+            name=name,
+            pgm_bytes=pgm_bytes,
+            yaml_bytes=yaml_bytes,
+            overwrite=overwrite,
+        )
+        return result
+
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Save map failed: {exc}",
+        )
+
+
+# =========================================================
+# Load map from upload
+# =========================================================
+
+@app.post("/map/load")
+async def load_map(
+    name: str = Form(...),
+    overwrite: bool = Form(False),
+    pgm: UploadFile = File(...),
+    yaml: Optional[UploadFile] = File(None),
+):
+    """
+    Upload a map (PGM + optional YAML) and store it as:
+        maps/<name>/<name>.pgm
+        maps/<name>/<name>.yaml
+
+    Refuses to overwrite an existing map unless ``overwrite`` is True.
+    """
+    if ros_node is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ROS node is not ready",
+        )
+
+    try:
+        pgm_bytes = await pgm.read()
+        yaml_bytes = await yaml.read() if yaml is not None else None
+
+        result = ros_node.save_map_to_disk(
+            name=name,
+            pgm_bytes=pgm_bytes,
+            yaml_bytes=yaml_bytes,
+            overwrite=overwrite,
+        )
+        return result
+
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Load map failed: {exc}",
+        )
+
+
+# =========================================================
 # Helio
 # =========================================================
 
@@ -1306,7 +1517,7 @@ async def helio_state(
 
     if ros_node and req.state:
         ros_node.set_profile(req.state)
-        
+
     if ros_node and req.event == "speaking_start" and req.text:
         ros_node.request_speech(req.text)
 

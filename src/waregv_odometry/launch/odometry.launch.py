@@ -31,19 +31,11 @@ def generate_launch_description():
             'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
             'wheel_radius': ParameterValue(LaunchConfiguration('wheel_radius'), value_type=float),
             'wheel_separation': ParameterValue(LaunchConfiguration('wheel_separation'), value_type=float),
-              'gyro_scale': 0.952,
+              'gyro_scale': 0.0,
         }],
     )
 
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_config,
-                    {'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
-        remappings=[('odometry/filtered', '/odom')],
-    )
+  
 
     odom_euler = Node(
         package='waregv_odometry',
@@ -52,13 +44,5 @@ def generate_launch_description():
         output='screen',
         parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
     )
-    
-    yaw_logger = Node(
-        package='waregv_odometry',
-        executable='yaw_logger',
-        name='yaw_logger',
-        output='screen',
-        parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
-    )
 
-    return LaunchDescription(args + [wheel_odometry, ekf_node, odom_euler])
+    return LaunchDescription(args + [wheel_odometry, odom_euler])
