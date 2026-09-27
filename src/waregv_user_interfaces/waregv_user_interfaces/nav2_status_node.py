@@ -2,10 +2,10 @@
 
 import json
 import re
-import serial
-import waregv_user_interfaces.qt_link as qt_link
+import socket
 import rclpy
 from rclpy.node import Node
+import waregv_user_interfaces.qt_link as qt_link
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from nav2_msgs.msg import BehaviorTreeLog
@@ -45,7 +45,19 @@ class ArduinoNavBridge(Node):
         )
 
         # Let the hardware know the node is alive
-        self.send_state("WareGV", "Bridge initialized", "")
+        self.send_state("WareGV", "", "")
+
+    def get_ip_address(self):
+        """Helper to get the primary IP address of the device."""
+        try:
+            # Connects to a dummy external address to find the preferred local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1" # Fallback if no network
 
     def status_cb(self, msg: GoalStatusArray):
         if not msg.status_list:
@@ -115,19 +127,19 @@ class ArduinoNavBridge(Node):
         elif self.current_goal_status == GoalStatus.STATUS_SUCCEEDED:
             title = "ARRIVED"
             subtitle = "Destination reached"
-            action = ""
+            action = "none"
             self.active_bt_node = None # Reset BT active node
 
         elif self.current_goal_status == GoalStatus.STATUS_ABORTED:
             title = "NAV ABORTED"
             subtitle = "Navigation failed"
-            action = ""
+            action = "none"
             self.active_bt_node = None
 
         elif self.current_goal_status == GoalStatus.STATUS_CANCELED:
             title = "NAV CANCELED"
             subtitle = "Navigation stopped"
-            action = ""
+            action = "none"
             self.active_bt_node = None
 
         self.send_state(title, subtitle, action)
@@ -135,6 +147,7 @@ class ArduinoNavBridge(Node):
     def send_state(self, title, subtitle, action):
         # Package and verify if the state has genuinely changed to prevent serial flooding
         state_dict = {
+            "ip": self.get_ip_address(),
             "title": title,
             "subtitle": subtitle[:35],  # Capped for safety on small displays
             "action": action
