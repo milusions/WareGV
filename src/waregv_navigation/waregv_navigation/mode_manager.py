@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import asyncio
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
@@ -106,13 +105,9 @@ class ModeManager(Node):
         request = ChangeState.Request()
         request.transition.id = transition_id
         try:
-            # Wrap call with timeout to prevent hanging on missing TF frames
             future = client.call_async(request)
-            response = await asyncio.wait_for(future, timeout=5.0)
+            response = await future
             return response.success
-        except asyncio.TimeoutError:
-            self.get_logger().error(f"Timeout changing state for node '{node_name}'. Ensure required TF frames exist.")
-            return False
         except Exception as e:
             self.get_logger().error(f"Failed to transition state for {node_name}: {e}")
             return False

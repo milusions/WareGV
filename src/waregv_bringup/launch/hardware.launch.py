@@ -171,6 +171,27 @@ def generate_launch_description():
                           PythonLaunchDescriptionSource(waregv_system_bringup_launch_file_path),
                           launch_arguments={"use_sim_time": use_sim_time}.items(),
                       )
+        waregv_mapping_launch_file_path = os.path.join(
+            get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
+        )
+    waregv_mapping = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
+            launch_arguments={"use_sim_time": use_sim_time}.items(),
+        )
+    
+    waregv_navigation_launch_file_path = os.path.join(
+            get_package_share_directory("waregv_navigation"),
+            "launch",
+            "navigation.launch.py",
+        )
+    waregv_navigation = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
+            launch_arguments={
+                "use_sim_time": use_sim_time,
+                "max_linear_velocity": max_linear_velocity_conf,
+                "max_angular_velocity": max_angular_velocity_conf,
+            }.items(),
+        )
 
     return LaunchDescription(
         [
@@ -182,13 +203,15 @@ def generate_launch_description():
             waregv_description,
             rosbridge_node,
             foxglove_bridge,
-            # waregv_user_interfaces,
+            waregv_user_interfaces,
             waregv_hardware,
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
             waregv_suite,
             # waregv_vision,
-            waregv_system_bringup
+            waregv_mapping,
+            waregv_navigation
+       
         ]
     )
