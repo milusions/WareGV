@@ -5,6 +5,7 @@ from rclpy.lifecycle import Node, State, TransitionCallbackReturn
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from geometry_msgs.msg import PointStamped
+from example_interfaces.srv import SetString
 import tf2_geometry_msgs
 from tf2_ros import Buffer, TransformListener
 
@@ -14,6 +15,8 @@ import cv2
 import json
 import os
 import math
+import time
+from collections import deque
 
 class ArucoLifecycleNode(Node):
     def __init__(self, node_name='aruco_tracker_node'):
@@ -25,6 +28,13 @@ class ArucoLifecycleNode(Node):
         self.target_ids = [0, 1] # Target specific IDs to eliminate false positives
         self.json_output_path = os.path.expanduser("~/waregv/waregv_ws/data/aruco.json")
         
+        # --- STABILITY PARAMETERS ---
+        self.history_length = 15           # Number of frame samples to track
+        self.min_samples_required = 10     # Minimum readings before assessing stability
+        self.max_allowed_drift_m = 0.02   # Max movement drift in meters (2 cm)
+        self.detection_timeout_s = 0.5     # Max age in seconds before marker is considered unstable
+        self.marker_history = {}           # History buffer per marker ID
+
         # Internal State Variables
         self.pipeline = None
         self.colorizer = None
@@ -46,7 +56,14 @@ class ArucoLifecycleNode(Node):
         self.detection_pub = None
         self.timer = None
         
-        self.get_logger().info(f"{node_name} initialized. Awaiting 'configure' transition.")
+        # Service Initialization
+        self.service = self.create_service(
+            SetString,
+            '/get_marker_pose',
+            self.get_marker_pose_callback
+        )
+        
+        self.get_logger().info(f"{node_name} initialized with service '/get_marker_pose'. Awaiting 'configure' transition.")
 
     def on_configure(self, state: State) -> TransitionCallbackReturn:
         self.get_logger().info("Configuring RealSense and ArUco parameters...")
@@ -241,6 +258,9 @@ class ArucoLifecycleNode(Node):
                         }
                     }
 
+                    # Update history buffer for stability calculations
+                    self._update_marker_history(str(marker_id), map_x, map_y, map_z, yaw)
+
                     # Draw 3D Box and Overlay Text with X, Y, and Yaw
                     self._draw_3d_bounding_box(aruco_image, self.camera_matrix, self.dist_coeffs, smoothed_rvec, smoothed_tvec, marker_id, map_x, map_y, yaw)
                     cv2.drawFrameAxes(aruco_image, self.camera_matrix, self.dist_coeffs, smoothed_rvec, smoothed_tvec, self.marker_size * 0.5)
@@ -295,6 +315,102 @@ class ArucoLifecycleNode(Node):
                     f.write(json.dumps(self.persisted_detections, indent=4))
             except Exception as e:
                 self.get_logger().error(f"Failed to write JSON file: {e}")
+
+    def _update_marker_history(self, marker_id_str: str, x: float, y: float, z: float, yaw: float):
+        current_time = time.time()
+        entry = {
+            "x": float(x),
+            "y": float(y),
+            "z": float(z),
+            "yaw": float(yaw),
+            "time": current_time
+        }
+        if marker_id_str not in self.marker_history:
+            self.marker_history[marker_id_str] = deque(maxlen=self.history_length)
+        self.marker_history[marker_id_str].append(entry)
+
+    def _evaluate_marker_stability(self, marker_id_str: str) -> dict:
+        current_time = time.time()
+
+        if marker_id_str not in self.marker_history or len(self.marker_history[marker_id_str]) == 0:
+            return {
+                "status": "unstable",
+                "reason": "Marker not detected"
+            }
+
+        history = self.marker_history[marker_id_str]
+        latest_entry = history[-1]
+
+        # 1. Freshness Check
+        if (current_time - latest_entry["time"]) > self.detection_timeout_s:
+            return {
+                "status": "unstable",
+                "reason": f"Signal lost. Last seen {round(current_time - latest_entry['time'], 2)}s ago"
+            }
+
+        # 2. Minimum Sample Count Check
+        if len(history) < self.min_samples_required:
+            return {
+                "status": "unstable",
+                "reason": f"Accumulating readings ({len(history)}/{self.min_samples_required})"
+            }
+
+        # 3. Spatial Drift / Variance Check
+        xs = [e["x"] for e in history]
+        ys = [e["y"] for e in history]
+        zs = [e["z"] for e in history]
+        yaws = [e["yaw"] for e in history]
+
+        max_drift = max(
+            np.ptp(xs),  # Peak-to-peak (max - min) range
+            np.ptp(ys),
+            np.ptp(zs)
+        )
+
+        if max_drift > self.max_allowed_drift_m:
+            return {
+                "status": "unstable",
+                "reason": f"Position fluctuating (drift = {round(float(max_drift), 4)}m > max allowed {self.max_allowed_drift_m}m)"
+            }
+
+        # If stable, compute mean pose values
+        avg_x = round(float(np.mean(xs)), 4)
+        avg_y = round(float(np.mean(ys)), 4)
+        avg_z = round(float(np.mean(zs)), 4)
+        avg_yaw = round(float(np.mean(yaws)), 4)
+
+        return {
+            "status": "stable",
+            "marker_id": marker_id_str,
+            "position_meters": {
+                "x": avg_x,
+                "y": avg_y,
+                "z": avg_z
+            },
+            "rotation": {
+                "yaw_rad": avg_yaw,
+                "yaw_deg": round(math.degrees(avg_yaw), 1)
+            }
+        }
+
+    def get_marker_pose_callback(self, request, response):
+        query = request.data.strip()
+
+        if query:
+            # If a specific marker ID is provided in query (e.g. "0")
+            eval_result = self._evaluate_marker_stability(query)
+            response.success = (eval_result["status"] == "stable")
+            response.message = json.dumps(eval_result, indent=2)
+        else:
+            # Default behavior: return ALL known markers
+            results = {}
+            for marker_id_str in list(self.marker_history.keys()):
+                results[marker_id_str] = self._evaluate_marker_stability(marker_id_str)
+
+            response.success = True
+            response.message = json.dumps(results, indent=2)
+
+        return response
 
     def _draw_3d_bounding_box(self, img, camera_matrix, dist_coeffs, rvec, tvec, marker_id, map_x, map_y, yaw):
         half_size = self.marker_size / 2.0
