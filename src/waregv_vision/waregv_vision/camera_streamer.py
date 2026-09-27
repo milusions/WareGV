@@ -96,5 +96,8 @@ def depth_feed():
 def aruco_feed():
     return Response(generate_stream('aruco'), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-if __name__ == '__main__':
+def main():
     app.run(host='0.0.0.0', port=5000, threaded=True)
+
+if __name__ == '__main__':
+    main()
