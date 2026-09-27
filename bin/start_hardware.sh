@@ -19,6 +19,8 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
+# --- Default Configurations ---
+MODE="slam_with_nav2"
 MAX_LINEAR_VELOCITY="0.3"
 MAX_ANGULAR_VELOCITY="0.35"
 WHEEL_RADIUS="0.036"
@@ -27,7 +29,10 @@ MAP_NAME="small_warehouse"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    
+        --mode)
+            MODE="$2"
+            shift 2
+            ;;
         --max-linear-velocity)
             MAX_LINEAR_VELOCITY="$2"
             shift 2
@@ -61,15 +66,15 @@ done
 cd ~/waregv/waregv_ws
 
 echo -e "  ${PRIMARY}[BUILDING]${RESET}   ${BOLD_WHITE}Compiling ROS 2 workspace (colcon build)...${RESET}"
-# Removed > /dev/null 2>&1 to allow the build process to print to the screen
 colcon build
 
 echo -e "  ${PRIMARY}[SOURCING]${RESET}   ${DIM_GRAY}Loading ROS 2 Jazzy environment setup...${RESET}"
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
-# Execute launch in background
+# Execute launch in background, passing the new mode argument
 stdbuf -oL -eL ros2 launch waregv_bringup hardware.launch.py \
+    mode:="$MODE" \
     max_linear_velocity:="$MAX_LINEAR_VELOCITY" \
     max_angular_velocity:="$MAX_ANGULAR_VELOCITY" \
     wheel_radius:="$WHEEL_RADIUS" \

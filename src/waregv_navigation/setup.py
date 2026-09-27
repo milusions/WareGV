@@ -41,7 +41,8 @@ setup(
         'console_scripts': [
             
             "mode_manager=waregv_navigation.mode_manager:main",
-            "auto_mode_switcher=waregv_navigation.auto_mode_switcher:main"
+            "auto_mode_switcher=waregv_navigation.auto_mode_switcher:main",
+            "amcl_initial_pose_node=waregv_navigation.amcl_initial_pose_node:main"
         
         ],
     },
