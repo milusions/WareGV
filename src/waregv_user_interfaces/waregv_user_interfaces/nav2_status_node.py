@@ -45,6 +45,7 @@ class ArduinoNavBridge(Node):
         )
 
         # Let the hardware know the node is alive
+        qt_link.send_to_qt({"ip":self.get_ip_address()})
         self.send_state("WareGV", "Bridge initialized", "")
 
     def get_ip_address(self):
@@ -147,7 +148,7 @@ class ArduinoNavBridge(Node):
     def send_state(self, title, subtitle, action):
         # Package and verify if the state has genuinely changed to prevent serial flooding
         state_dict = {
-            "ip": self.get_ip_address(),
+       
             "title": title,
             "subtitle": subtitle[:35],  # Capped for safety on small displays
             "action": action
