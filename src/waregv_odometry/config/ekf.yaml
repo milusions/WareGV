@@ -1,10 +1,18 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 5.0              # Lowered from 20.0 to reliably meet processing deadlines
+    # FIX: was 5.0. Running the filter this slow adds up to ~200ms of lag
+    # between the true pose and the published pose, which is exactly what
+    # makes lidar scans appear to slide off a SLAM map during rotation.
+    # If 20.0 previously caused missed real-time deadlines, profile and fix
+    # whichever callback was slow instead of slowing the filter down.
+    frequency: 20.0
     sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
-    predict_to_current_time: false # Disabled to reduce heavy computational overhead and queue delays
+    # FIX: was false. This forces the EKF to extrapolate its state estimate
+    # to the current time on every update instead of only at sparse,
+    # irregular sensor-arrival instants, which removes most of the pose lag.
+    predict_to_current_time: true
     transform_timeout: 0.1
     print_diagnostics: false
 

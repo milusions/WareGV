@@ -17,7 +17,9 @@ Outputs
 Yaw-rate pipeline (gyro source)
   1. g = (raw - bias) * gyro_scale
   2. Physical gate: |g| > max_yaw_rate or an impossible jump -> replaced by the
-     wrap-safe orientation rate (or held). Genuine fast spins pass.
+     wrap-safe orientation rate (or held). Genuine fast spins pass. Gated
+     samples are NOT fed into the Hampel window (see fix note below) so they
+     cannot contaminate the outlier statistics.
   3. Hampel outlier filter: an isolated sample far from the median of the last 5
      is replaced by that median (removes the single-sample gyro spikes).
   4. ZUPT: when the wheels report standstill for zupt_time and the rate is tiny,
@@ -30,6 +32,14 @@ the logs) are rejected, so the orientation can never inject garbage.
 
 No pose integration and no TF here: the EKF owns odom -> base_footprint.
 Parameters are read once at startup.
+
+CALIBRATION NOTE (read before trusting this node's yaw output):
+  wheel_separation and gyro_scale both default to placeholder values and MUST
+  be measured on your robot with the spin-test procedure (see
+  calibrate_yaw.py). An uncalibrated wheel_separation injects a constant
+  proportional error into every turn's yaw contribution; an uncalibrated
+  gyro_scale does the same to the gyro path. Either one, left unfixed, causes
+  exactly the slow heading drift this pipeline is otherwise built to prevent.
 """
 import math
 from collections import deque
@@ -62,12 +72,12 @@ class WheelOdometryNode(Node):
         super().__init__('wheel_odometry')
 
         self.declare_parameter('wheel_radius', 0.036)
-        self.declare_parameter('wheel_separation', 0.392)  # EFFECTIVE track width; calibrate
+        self.declare_parameter('wheel_separation', 0.392)  # EFFECTIVE track width; MUST calibrate, see calibrate_yaw.py
         self.declare_parameter('left_sign', 1.0)
         self.declare_parameter('right_sign', 1.0)
         self.declare_parameter('yaw_rate_source', 'gyro')  # 'gyro' | 'orientation'
         self.declare_parameter('gyro_bias_z', 0.0)
-        self.declare_parameter('gyro_scale', 1.0)          # true_angle / measured_angle
+        self.declare_parameter('gyro_scale', 1.0)          # true_angle / measured_angle; MUST calibrate
         self.declare_parameter('max_yaw_rate', 4.0)        # rad/s
         self.declare_parameter('max_yaw_accel', 80.0)      # rad/s^2
         self.declare_parameter('min_jump', 0.5)            # rad/s
@@ -141,6 +151,10 @@ class WheelOdometryNode(Node):
         self.last_orient_yaw = None
         self.orient_rejects = 0
 
+        # bias diagnostics: warn if it never converges (see FIX #3 below)
+        self.bias_last_report = self.bias
+        self.bias_updates_since_report = 0
+
         self.diag_t0 = None
         self.diag_gyro0 = 0.0
         self.diag_orient0 = 0.0
@@ -164,9 +178,18 @@ class WheelOdometryNode(Node):
         return t
 
     def _report(self):
+        # FIX #3: surface whether bias learning is actually converging, since a
+        # stuck bias is a classic silent cause of linear heading drift.
+        bias_moved = abs(self.bias - self.bias_last_report)
+        stuck_warning = ''
+        if self.auto_bias and self.bias_updates_since_report == 0:
+            stuck_warning = ' | WARNING: bias has not updated in the last 10s (robot rarely fully still?)'
         self.get_logger().info(
-            f'bias={self.bias:+.5f} rad/s | gate rejects={self.n_gate}, '
-            f'gyro outliers={self.n_hampel}, orientation glitches={self.n_orient_glitch}')
+            f'bias={self.bias:+.5f} rad/s (Δ={bias_moved:+.5f}) | gate rejects={self.n_gate}, '
+            f'gyro outliers={self.n_hampel}, orientation glitches={self.n_orient_glitch}'
+            f'{stuck_warning}')
+        self.bias_last_report = self.bias
+        self.bias_updates_since_report = 0
 
     # ---------- wheels ----------
     def joint_cb(self, msg: JointState):
@@ -277,9 +300,15 @@ class WheelOdometryNode(Node):
                 f'Gyro sample rejected (g={g:.2f} rad/s, last={self.last_good_rate:.2f}) '
                 f'at heading {heading:.0f} deg', throttle_duration_sec=0.5)
             g = self.orient_rate_ema if self.have_orient_rate else self.last_good_rate
-            self.window.append(g)
+            # FIX #5 (Hampel contamination): do NOT push this synthetic
+            # fallback value into self.window. It is not a real measurement,
+            # and letting it in corrupts the median/sigma the Hampel filter
+            # uses right when we most need that filter to be trustworthy
+            # (immediately after a gate rejection). last_good_rate is also
+            # intentionally left unchanged here since g was not organic.
         else:
-            # ---- 2. Hampel isolated-outlier filter (window holds pre-filter values) ----
+            # ---- 2. Hampel isolated-outlier filter (window holds pre-filter,
+            #         organic values only) ----
             cleaned = g
             if len(self.window) >= 3:
                 m = median(self.window)
@@ -309,6 +338,7 @@ class WheelOdometryNode(Node):
         if (self.auto_bias and raw is not None and not replaced and
                 still_for >= self.bias_time and abs(raw - self.bias) < 0.15):
             self.bias += self.bias_alpha * (raw - self.bias)
+            self.bias_updates_since_report += 1
 
         # ---- 5. ZUPT: no yaw creep while parked ----
         if self.auto_zupt and still_for >= self.zupt_time and abs(rate) < self.zupt_rate:
