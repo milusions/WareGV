@@ -1,29 +1,19 @@
 ekf_filter_node:
   ros__parameters:
-    # FIX: was 5.0. Running the filter this slow adds up to ~200ms of lag
-    # between the true pose and the published pose, which is exactly what
-    # makes lidar scans appear to slide off a SLAM map during rotation.
-    # If 20.0 previously caused missed real-time deadlines, profile and fix
-    # whichever callback was slow instead of slowing the filter down.
     frequency: 20.0
     sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
-    # FIX: was false. This forces the EKF to extrapolate its state estimate
-    # to the current time on every update instead of only at sparse,
-    # irregular sensor-arrival instants, which removes most of the pose lag.
     predict_to_current_time: true
     transform_timeout: 0.1
     print_diagnostics: false
+    use_realtime_priority: true          # PI4 OPT: try to raise scheduling priority
 
     map_frame: map
     odom_frame: odom
     base_link_frame: base_footprint
-    world_frame: odom          # EKF publishes odom -> base_footprint (SLAM owns map -> odom)
+    world_frame: odom
 
-    # Config order: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
-
-    # Wheel inverse-kinematics twist: forward speed + yaw rate
     odom0: /wheel/odom
     odom0_config: [false, false, false,
                    false, false, false,
@@ -33,7 +23,6 @@ ekf_filter_node:
     odom0_queue_size: 10
     odom0_differential: false
 
-    # Gyro: yaw rate only (already averaged to ~50 Hz by wheel_odometry)
     imu0: /imu/filtered
     imu0_config: [false, false, false,
                   false, false, false,

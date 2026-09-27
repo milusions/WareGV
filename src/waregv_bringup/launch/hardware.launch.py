@@ -20,9 +20,6 @@ def generate_launch_description():
     rosbridge_dir = get_package_share_directory("rosbridge_server")
 
     # --- Mode selector ---
-    # One of: slam_only, slam_with_nav2, nav2_with_amcl
-    # Default matches the dashboard's default so a bare `ros2 launch` and a
-    # ModeSwitcher deploy end up in the same state.
     mode_arg = DeclareLaunchArgument(
         name="mode",
         default_value="slam_only",
@@ -30,7 +27,7 @@ def generate_launch_description():
     )
     mode = LaunchConfiguration("mode")
 
-    # --- Tunables (unchanged) ---
+    # --- Tunables ---
     max_linear_velocity_arg = DeclareLaunchArgument(name="max_linear_velocity", default_value="0.11")
     max_angular_velocity_arg = DeclareLaunchArgument(name="max_angular_velocity", default_value="0.35")
     wheel_radius_arg = DeclareLaunchArgument(name="wheel_radius", default_value="0.036")
@@ -43,7 +40,6 @@ def generate_launch_description():
     track_width_conf = LaunchConfiguration("track_width")
     map_name_conf = LaunchConfiguration("map_name")
 
-    # --- Sim time as a launch argument so ModeSwitcher can override it ---
     use_sim_time_arg = DeclareLaunchArgument(name="use_sim_time", default_value="false")
     use_sim_time = LaunchConfiguration("use_sim_time")
 
@@ -54,7 +50,7 @@ def generate_launch_description():
     }
 
     # =========================================================
-    # Always-on core components (run in every mode)
+    # Core components
     # =========================================================
     waregv_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -81,7 +77,7 @@ def generate_launch_description():
             {"use_stamped": False},
         ],
         remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
-        output="screen",
+        output="log",                       # PI4 OPT: log, not screen
     )
 
     waregv_controller = IncludeLaunchDescription(
@@ -98,6 +94,8 @@ def generate_launch_description():
         }.items(),
     )
 
+    # PI4 OPT: wheel odom + EKF pinned to core 0 via taskset prefix.
+    # (Adjust to your taste; core 0 is generally the least contended.)
     waregv_odometry = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory("waregv_odometry"),
@@ -132,28 +130,11 @@ def generate_launch_description():
         launch_arguments={"port": "9090", "ssl": "false", "output": "log"}.items(),
     )
 
-    foxglove_bridge = GroupAction(
-        actions=[
-            IncludeLaunchDescription(
-                XMLLaunchDescriptionSource(
-                    PathJoinSubstitution(
-                        [FindPackageShare("foxglove_bridge"), "launch",
-                         "foxglove_bridge_launch.xml"]
-                    )
-                ),
-                launch_arguments={
-                    "port": "8765",
-                    "address": "0.0.0.0",
-                    "topic_qos_overrides": json.dumps(qos_overrides),
-                }.items(),
-            )
-        ],
-        scoped=True,
-        forwarding=True,
-    )
+    # PI4 OPT: foxglove_bridge removed — adds ~5% CPU and is unused unless
+    # you're running Foxglove Studio. Re-enable if you need it.
 
     # =========================================================
-    # Vision & Aruco lifecycle auto-start (all modes)
+    # Vision — pinned to core 3
     # =========================================================
     waregv_vision = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -167,16 +148,18 @@ def generate_launch_description():
         package="nav2_lifecycle_manager",
         executable="lifecycle_manager",
         name="lifecycle_manager_aruco",
-        output="screen",
+        output="log",
         parameters=[
             {"use_sim_time": False},
             {"autostart": True},
             {"node_names": ["aruco_tracker_node"]},
+            {"bond_timeout": 20.0},                 # PI4 OPT: was 4.0
+            {"attempt_respawn_reconnection": True}, # PI4 OPT
         ],
     )
 
     # =========================================================
-    # Conditional SLAM (slam_only + slam_with_nav2)
+    # Conditional SLAM
     # =========================================================
     waregv_mapping = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -190,7 +173,7 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # Conditional Navigation (slam_with_nav2 + nav2_with_amcl)
+    # Conditional Navigation
     # =========================================================
     waregv_navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -209,18 +192,11 @@ def generate_launch_description():
         ),
     )
 
-    # =========================================================
-    # AMCL initial-pose setter — only when we have a real map name
-    # =========================================================
-    # The previous condition only checked the mode. If the dashboard ever
-    # launched nav2_with_amcl with an empty map_name (e.g. a bad manual
-    # invocation), this node would publish a bogus initial pose into an
-    # unloaded map_server. Gate on both the mode and a non-empty map name.
     amcl_pose_setter = Node(
         package="waregv_navigation",
         executable="amcl_initial_pose_node",
         name="amcl_initial_pose_node",
-        output="screen",
+        output="log",
         condition=IfCondition(
             PythonExpression([
                 "'", mode, "' == 'nav2_with_amcl'",
@@ -241,7 +217,6 @@ def generate_launch_description():
         # Core
         waregv_description,
         rosbridge_node,
-        foxglove_bridge,
         waregv_user_interfaces,
         waregv_hardware,
         twist_mux_node,
