@@ -21,6 +21,14 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}],
         output='screen'
     )
+    sound_player_node = Node(
+            package='waregv_user_interfaces',
+            executable='sound_player_node',
+            name='sound_player_node',
+            parameters=[{'use_sim_time': use_sim_time}],
+            output='screen'
+        )
+    
 
 
 
