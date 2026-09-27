@@ -41,11 +41,14 @@ from tf2_ros import Buffer, TransformListener, TransformException
 # ---------------------------------------------------------
 # FastAPI
 # ---------------------------------------------------------
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import shutil
+
+LOADED_MAP_DIR = pathlib.Path.home() / "waregv" / "waregv_ws" / "src" / "waregv_mapping" / "maps" / "loaded"
 
 
 # =========================================================
@@ -1253,6 +1256,117 @@ async def abort_mission():
             status_code=500,
             detail=str(exc),
         )
+
+
+# =========================================================
+# Loaded-map directory (BGM/PGM + YAML + Aruco JSON)
+# =========================================================
+
+def _loaded_map_exists(safe_name: str) -> bool:
+    LOADED_MAP_DIR.mkdir(parents=True, exist_ok=True)
+    return any(LOADED_MAP_DIR.glob(f"{safe_name}.*"))
+
+
+@app.get("/map/loaded/exists")
+async def loaded_map_exists(name: str):
+    safe_name = WareGVBrigeNode._safe_map_name(name)
+    if not safe_name:
+        raise HTTPException(status_code=422, detail="Map name is empty.")
+    return {"ok": True, "name": safe_name, "exists": _loaded_map_exists(safe_name)}
+
+
+@app.post("/map/load")
+async def load_map(
+    map_name: str = Form(...),
+    overwrite: bool = Form(False),
+    bgm_file: UploadFile = File(...),
+    yaml_file: UploadFile = File(...),
+    aruco_file: UploadFile = File(...),
+):
+    """
+    Receive the 3 map files (image/BGM-PGM, YAML, Aruco JSON) from the
+    frontend and store them under LOADED_MAP_DIR/<map_name>.*
+    """
+    safe_name = WareGVBrigeNode._safe_map_name(map_name)
+    if not safe_name:
+        raise HTTPException(status_code=422, detail="Map name is empty.")
+
+    LOADED_MAP_DIR.mkdir(parents=True, exist_ok=True)
+
+    if _loaded_map_exists(safe_name) and not overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A map named '{safe_name}' already exists in {LOADED_MAP_DIR}.",
+        )
+
+    def _ext(upload: UploadFile, fallback: str) -> str:
+        suffix = pathlib.Path(upload.filename or "").suffix
+        return suffix if suffix else fallback
+
+    try:
+        saved = []
+        for upload, fallback_ext in (
+            (bgm_file, ".pgm"),
+            (yaml_file, ".yaml"),
+            (aruco_file, ".json"),
+        ):
+            dest = LOADED_MAP_DIR / f"{safe_name}{_ext(upload, fallback_ext)}"
+            with dest.open("wb") as out_file:
+                shutil.copyfileobj(upload.file, out_file)
+            saved.append(str(dest))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not store map files: {exc}")
+
+    return {"ok": True, "name": safe_name, "saved": saved, "directory": str(LOADED_MAP_DIR)}
+
+
+@app.post("/map/save_to_loaded")
+async def save_to_loaded(name: str = Form(...), overwrite: bool = Form(False)):
+    """
+    Used by the 'Save Map' button: copies the currently active map's
+    YAML/image (+ aruco.json if present) into LOADED_MAP_DIR under the
+    user-given name, in addition to the zip download.
+    """
+    if ros_node is None:
+        raise HTTPException(status_code=503, detail="ROS node is not ready")
+
+    safe_name = ros_node._safe_map_name(name)
+    if not safe_name:
+        raise HTTPException(status_code=422, detail="Map name is empty.")
+
+    if _loaded_map_exists(safe_name) and not overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A map named '{safe_name}' already exists in {LOADED_MAP_DIR}.",
+        )
+
+    paths = ros_node._map_paths(safe_name if safe_name != ros_node.current_map else ros_node.current_map)
+    paths = paths or ros_node._map_paths(ros_node.current_map)
+    if paths is None:
+        raise HTTPException(status_code=404, detail=f"No active map files found to save as '{safe_name}'.")
+
+    yaml_path, image_path = paths
+    LOADED_MAP_DIR.mkdir(parents=True, exist_ok=True)
+
+    try:
+        saved = []
+        yaml_dest = LOADED_MAP_DIR / f"{safe_name}{yaml_path.suffix}"
+        shutil.copyfile(yaml_path, yaml_dest)
+        saved.append(str(yaml_dest))
+
+        image_dest = LOADED_MAP_DIR / f"{safe_name}{image_path.suffix}"
+        shutil.copyfile(image_path, image_dest)
+        saved.append(str(image_dest))
+
+        aruco_src = pathlib.Path.home() / "waregv" / "waregv_ws" / "data" / "aruco.json"
+        if aruco_src.exists():
+            aruco_dest = LOADED_MAP_DIR / f"{safe_name}.json"
+            shutil.copyfile(aruco_src, aruco_dest)
+            saved.append(str(aruco_dest))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save map to loaded directory: {exc}")
+
+    return {"ok": True, "name": safe_name, "saved": saved, "directory": str(LOADED_MAP_DIR)}
 
 
 # =========================================================

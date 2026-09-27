@@ -5,7 +5,7 @@ from rclpy.lifecycle import Node, State, TransitionCallbackReturn
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from geometry_msgs.msg import PointStamped
-from example_interfaces.srv import SetString
+from std_srvs.srv import Trigger
 import tf2_geometry_msgs
 from tf2_ros import Buffer, TransformListener
 
@@ -58,7 +58,7 @@ class ArucoLifecycleNode(Node):
         
         # Service Initialization
         self.service = self.create_service(
-            SetString,
+            Trigger,
             '/get_marker_pose',
             self.get_marker_pose_callback
         )
@@ -394,19 +394,14 @@ class ArucoLifecycleNode(Node):
         }
 
     def get_marker_pose_callback(self, request, response):
-        query = request.data.strip()
+        results = {}
+        for marker_id_str in list(self.marker_history.keys()):
+            results[marker_id_str] = self._evaluate_marker_stability(marker_id_str)
 
-        if query:
-            # If a specific marker ID is provided in query (e.g. "0")
-            eval_result = self._evaluate_marker_stability(query)
-            response.success = (eval_result["status"] == "stable")
-            response.message = json.dumps(eval_result, indent=2)
+        if not results:
+            response.success = False
+            response.message = json.dumps({"status": "unstable", "reason": "No markers detected yet"})
         else:
-            # Default behavior: return ALL known markers
-            results = {}
-            for marker_id_str in list(self.marker_history.keys()):
-                results[marker_id_str] = self._evaluate_marker_stability(marker_id_str)
-
             response.success = True
             response.message = json.dumps(results, indent=2)
 
