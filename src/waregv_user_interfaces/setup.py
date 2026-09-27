@@ -28,6 +28,7 @@ setup(
         'console_scripts': [
 
             'nav2_status_node = waregv_user_interfaces.nav2_status_node:main',
+            "sound_player=waregv_user_interfaces.sound_player:main"
            
         ],
     },

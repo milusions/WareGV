@@ -9,6 +9,7 @@ import waregv_user_interfaces.qt_link as qt_link
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from nav2_msgs.msg import BehaviorTreeLog
+from std_msgs.msg import String
 
 class ArduinoNavBridge(Node):
     def __init__(self):
@@ -27,6 +28,7 @@ class ArduinoNavBridge(Node):
         self.current_goal_status = None
         self.active_bt_node = None
         self.last_sent_state = None
+        self.last_sent_media = None
 
         # Subscribe to the Nav2 action server status
         self.status_sub = self.create_subscription(
@@ -44,8 +46,16 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # Let the hardware know the node is alive
+        # Publisher for the MP4 Media Player node
+        self.media_pub = self.create_publisher(
+            String,
+            '/robot_operator/play_media',
+            10
+        )
+
+        # Initialize state with IP address included
         self.send_state("WareGV", "", "")
+        self.publish_media("initialized.mp4")
 
     def get_ip_address(self):
         """Helper to get the primary IP address of the device."""
@@ -89,12 +99,14 @@ class ArduinoNavBridge(Node):
         title = "IDLE"
         subtitle = "Waiting for instructions"
         action = ""
+        media_file = ""
 
-        # Goal Status Mapping logic
+        # Goal Status Mapping logic & Media Assignment
         if self.current_goal_status == GoalStatus.STATUS_ACCEPTED:
             title = "GOAL ACCEPTED"
             subtitle = "Preparing route..."
             action = "spinner"
+            media_file = "preparing.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_EXECUTING:
             # Drop down into minute BT node details if available
@@ -106,46 +118,57 @@ class ArduinoNavBridge(Node):
                     title = "RECOVERING"
                     subtitle = f"Executing: {node_name}"
                     action = "spinner"
+                    media_file = "recovering.mp4"
                 elif re.search(r"computepathtopose|compute_path|planner|smoothpath|smooth_path", node_name, re.IGNORECASE):
                     title = "REPLANNING"
                     subtitle = "Computing new path..."
                     action = "spinner"
+                    media_file = "replanning.mp4"
                 elif re.search(r"followpath|follow_path", node_name, re.IGNORECASE):
                     title = "NAVIGATING"
                     subtitle = "Following optimal path"
                     action = "loader"
+                    media_file = "navigating.mp4"
                 else:
                     # Fallback for unrecognized BT nodes
                     title = "NAVIGATING"
                     subtitle = f"Running {node_name}"
                     action = "loader"
+                    media_file = "navigating.mp4"
             else:
                 title = "NAVIGATING"
                 subtitle = "En route to destination"
                 action = "loader"
+                media_file = "navigating.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_SUCCEEDED:
             title = "ARRIVED"
             subtitle = "Destination reached"
             action = "none"
+            media_file = "arrived.mp4"
             self.active_bt_node = None # Reset BT active node
 
         elif self.current_goal_status == GoalStatus.STATUS_ABORTED:
             title = "NAV ABORTED"
             subtitle = "Navigation failed"
             action = "none"
+            media_file = "nav_aborted.mp4"
             self.active_bt_node = None
 
         elif self.current_goal_status == GoalStatus.STATUS_CANCELED:
             title = "NAV CANCELED"
             subtitle = "Navigation stopped"
             action = "none"
+            media_file = "nav_canceled.mp4"
             self.active_bt_node = None
 
         self.send_state(title, subtitle, action)
+        media_file = ""
+        if media_file:
+            self.publish_media(media_file)
 
     def send_state(self, title, subtitle, action):
-        # Package and verify if the state has genuinely changed to prevent serial flooding
+        # Package state including IP address and prevent serial flooding
         state_dict = {
             "ip": self.get_ip_address(),
             "title": title,
@@ -156,6 +179,15 @@ class ArduinoNavBridge(Node):
         if state_dict != self.last_sent_state:
             qt_link.send_to_qt(state_dict)
             self.last_sent_state = state_dict
+
+    def publish_media(self, filename: str):
+        # Prevent spamming identical media play commands repeatedly
+        if filename != self.last_sent_media:
+            msg = String()
+            msg.data = filename
+            self.media_pub.publish(msg)
+            self.last_sent_media = filename
+            self.get_logger().info(f"Triggered media playback for state: {filename}")
 
 def main(args=None):
     rclpy.init(args=args)
