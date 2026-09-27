@@ -171,7 +171,7 @@ def generate_launch_description():
                           PythonLaunchDescriptionSource(waregv_system_bringup_launch_file_path),
                           launch_arguments={"use_sim_time": use_sim_time}.items(),
                       )
-        waregv_mapping_launch_file_path = os.path.join(
+    waregv_mapping_launch_file_path = os.path.join(
             get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
         )
     waregv_mapping = IncludeLaunchDescription(
