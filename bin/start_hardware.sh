@@ -19,8 +19,8 @@ while ! ip link show up | grep -q "lo"; do
     sleep 1
 done
 
-MAX_LINEAR_VELOCITY="0.11"
-MAX_ANGULAR_VELOCITY="0.35"
+MAX_LINEAR_VELOCITY="0.30"
+MAX_ANGULAR_VELOCITY="0.21"
 WHEEL_RADIUS="0.036"
 track_width="0.192"
 MAP_NAME="small_warehouse"
