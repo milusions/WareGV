@@ -6,7 +6,11 @@ import io
 import os
 import re
 import pathlib
+import subprocess
+import signal
+import time as _time
 from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Dict, Any
 
 # ---------------------------------------------------------
@@ -96,6 +100,335 @@ class HelioStatePayload(BaseModel):
 
 
 # =========================================================
+# Mode switcher
+# =========================================================
+
+MODE_TO_ARGS = {
+    "slam_only":      {"mode": "slam_only"},
+    "slam_with_nav2": {"mode": "slam_with_nav2"},
+    "nav2_with_amcl": {"mode": "nav2_with_amcl"},
+}
+
+# Human-readable status text emitted during a deploy so the dashboard can
+# show exactly which step is running.
+MODE_STEPS = {
+    "slam_only": [
+        (5,  "Stopping Nav2 / localization stack"),
+        (12, "Starting SLAM Toolbox"),
+        (20, "Waiting for /map topic"),
+        (35, "Waiting for map -> base_link TF"),
+        (50, "Scanning Aruco markers"),
+        (65, "Saving map to disk"),
+        (80, "Finalizing SLAM-only mode"),
+    ],
+    "slam_with_nav2": [
+        (5,  "Stopping previous stack"),
+        (12, "Starting SLAM Toolbox"),
+        (22, "Waiting for /map topic"),
+        (35, "Starting Nav2 (controller / planner / BT)"),
+        (50, "Waiting for Nav2 lifecycle nodes to activate"),
+        (65, "Scanning Aruco markers"),
+        (80, "Finalizing SLAM + Nav2"),
+    ],
+    "nav2_with_amcl": [
+        (5,  "Stopping SLAM Toolbox"),
+        (12, "Loading selected map into map_server"),
+        (25, "Starting AMCL"),
+        (40, "Waiting for /amcl_pose (initial pose required)"),
+        (55, "Waiting for AMCL TF map -> odom"),
+        (70, "Starting Nav2 stack"),
+        (85, "Scanning Aruco markers"),
+        (95, "Finalizing Nav2 + AMCL"),
+    ],
+}
+
+
+@dataclass
+class DeployState:
+    running: bool = False
+    target_mode: str = ""
+    map_name: str = ""
+    started_at: float = 0.0
+    step_idx: int = 0
+    step_text: str = "Idle"
+    progress: int = 0
+    ok: Optional[bool] = None
+    message: str = ""
+    log: List[str] = field(default_factory=list)
+
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "running": self.running,
+            "target_mode": self.target_mode,
+            "map_name": self.map_name,
+            "step": self.step_text,
+            "step_index": self.step_idx,
+            "progress": self.progress,
+            "ok": self.ok,
+            "message": self.message,
+            "log": self.log[-40:],
+            "started_at": self.started_at,
+        }
+
+
+class ModeSwitcher:
+    """
+    Kills and restarts the hardware launch stack with the requested mode.
+
+    The launch file lives at:
+        <waregv_bringup>/launch/hardware.launch.py
+    and already supports a `mode` + `map_name` argument.
+    """
+
+    def __init__(self, node: "WareGVBrigeNode"):
+        self.node = node
+        self.state = DeployState()
+        self._proc: Optional[subprocess.Popen] = None
+        self._lock = threading.Lock()
+
+    # ---------------------------------------------------------------
+    # Public API
+    # ---------------------------------------------------------------
+
+    def is_busy(self) -> bool:
+        return self.state.running
+
+    def status(self) -> Dict[str, Any]:
+        return self.state.snapshot()
+
+    def deploy(self, target_mode: str, map_name: str = "") -> bool:
+        target_mode = (target_mode or "").strip()
+        if target_mode not in MODE_TO_ARGS:
+            raise ValueError(f"Unknown mode '{target_mode}'.")
+
+        if target_mode == "nav2_with_amcl":
+            if not map_name:
+                raise ValueError("nav2_with_amcl requires a loaded map name.")
+            info = self.node.get_map_info(map_name)
+            if not info.get("exists"):
+                raise ValueError(info.get("detail") or f"Map '{map_name}' not found.")
+
+        with self._lock:
+            if self.state.running:
+                raise RuntimeError("A deployment is already running.")
+
+            self.state = DeployState(
+                running=True,
+                target_mode=target_mode,
+                map_name=map_name,
+                started_at=_time.time(),
+                step_text="Starting deployment…",
+                progress=0,
+            )
+
+        threading.Thread(
+            target=self._run_deploy,
+            args=(target_mode, map_name),
+            daemon=True,
+        ).start()
+        return True
+
+    # ---------------------------------------------------------------
+    # Internal
+    # ---------------------------------------------------------------
+
+    def _log(self, text: str):
+        stamp = _time.strftime("%H:%M:%S")
+        line = f"[{stamp}] {text}"
+        self.state.log.append(line)
+        if len(self.state.log) > 500:
+            del self.state.log[:200]
+        try:
+            self.node.get_logger().info(f"[ModeSwitcher] {text}")
+        except Exception:
+            pass
+
+    def _step(self, idx: int, text: str, progress: int):
+        self.state.step_idx = idx
+        self.state.step_text = text
+        self.state.progress = progress
+        self._log(text)
+
+    def _kill_current_stack(self):
+        """Kill any hardware.launch.py / SLAM / Nav2 processes we spawned earlier."""
+        if self._proc is not None:
+            try:
+                self._log(f"Terminating previous stack (pid {self._proc.pid})…")
+                os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                self._log(f"Process kill error: {exc}")
+            try:
+                self._proc.wait(timeout=8.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(self._proc.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+            self._proc = None
+
+        # Best-effort sweep for any orphaned launch processes from a crashed deploy.
+        for name in (
+            "slam_toolbox",
+            "amcl",
+            "controller_server",
+            "planner_server",
+            "bt_navigator",
+            "behavior_server",
+            "recoveries_server",
+            "waypoint_follower",
+            "map_server",
+            "lifecycle_manager",
+            "smoother_server",
+            "velocity_smoother",
+            "collision_monitor",
+        ):
+            try:
+                subprocess.run(
+                    ["pkill", "-TERM", "-f", name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                )
+            except Exception:
+                pass
+        _time.sleep(1.5)
+
+    def _launch_stack(self, target_mode: str, map_name: str):
+        from ament_index_python.packages import get_package_share_directory
+
+        bringup_dir = get_package_share_directory("waregv_bringup")
+        launch_path = os.path.join(bringup_dir, "launch", "hardware.launch.py")
+
+        cmd = [
+            "ros2", "launch", launch_path,
+            f"mode:={target_mode}",
+        ]
+        if target_mode == "nav2_with_amcl":
+            cmd.append(f"map_name:={map_name}")
+
+        self._log("$ " + " ".join(cmd))
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            preexec_fn=os.setsid,
+            bufsize=1,
+            universal_newlines=True,
+        )
+        # Stream launch output into our log buffer.
+        threading.Thread(
+            target=self._pump_output,
+            args=(self._proc,),
+            daemon=True,
+        ).start()
+
+    def _pump_output(self, proc: subprocess.Popen):
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                line = (line or "").rstrip()
+                if line:
+                    self.state.log.append(line)
+                    if len(self.state.log) > 500:
+                        del self.state.log[:200]
+        except Exception:
+            pass
+
+    def _wait_for_topic(self, topic: str, timeout: float) -> bool:
+        """Poll `ros2 topic list` until the topic shows up."""
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            try:
+                out = subprocess.run(
+                    ["ros2", "topic", "list"],
+                    capture_output=True, text=True, timeout=3,
+                ).stdout
+                if topic in out.split():
+                    return True
+            except Exception:
+                pass
+            _time.sleep(1.0)
+        return False
+
+    def _wait_for_tf(self, parent: str, child: str, timeout: float) -> bool:
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            try:
+                proc = subprocess.run(
+                    ["ros2", "run", "tf2_ros", "tf2_echo", parent, child],
+                    capture_output=True, text=True, timeout=2,
+                )
+                if "Translation" in proc.stdout:
+                    return True
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception:
+                pass
+            _time.sleep(1.0)
+        return False
+
+    def _run_deploy(self, target_mode: str, map_name: str):
+        steps = MODE_STEPS[target_mode]
+        try:
+            # --- Step: kill old stack ---
+            self._step(0, steps[0][1], steps[0][0])
+            self._kill_current_stack()
+
+            # --- Step: launch new stack ---
+            self._step(1, steps[1][1], steps[1][0])
+            self._launch_stack(target_mode, map_name)
+            _time.sleep(3.0)
+
+            if self._proc is None or self._proc.poll() is not None:
+                raise RuntimeError("Launch process exited immediately — check the log above.")
+
+            # --- Step: wait for expected topics / TF ---
+            for idx, (progress, text) in enumerate(steps[2:], start=2):
+                self._step(idx, text, progress)
+
+                if "map topic" in text.lower():
+                    if not self._wait_for_topic("/map", 25.0):
+                        self._log("Warning: /map topic not seen within 25 s.")
+
+                elif "map -> base_link" in text:
+                    if not self._wait_for_tf("map", "base_link", 30.0):
+                        self._log("Warning: map -> base_link TF not yet available.")
+
+                elif "/amcl_pose" in text:
+                    if not self._wait_for_topic("/amcl_pose", 25.0):
+                        self._log("Waiting for /amcl_pose (needs an initial pose from the map panel).")
+
+                elif "AMCL TF" in text:
+                    if not self._wait_for_tf("map", "odom", 30.0):
+                        self._log("Warning: AMCL has not published map -> odom yet.")
+
+                elif "Nav2 lifecycle" in text:
+                    _time.sleep(6.0)
+
+                else:
+                    _time.sleep(1.5)
+
+            # --- Done ---
+            self.node.current_mode = target_mode
+            if map_name:
+                self.node.current_map = map_name
+            self.state.running = False
+            self.state.ok = True
+            self.state.progress = 100
+            self.state.step_text = "Deployment complete"
+            self.state.message = f"Mode '{target_mode}' is live."
+            self._log(self.state.message)
+
+        except Exception as exc:
+            self.state.running = False
+            self.state.ok = False
+            self.state.step_text = "Deployment failed"
+            self.state.message = str(exc)
+            self._log(f"ERROR: {exc}")
+
+
+# =========================================================
 # ROS 2 REST bridge
 # =========================================================
 
@@ -120,7 +453,7 @@ class WareGVBrigeNode(Node):
         # -------------------------------------------------
         # Current system state
         # -------------------------------------------------
-        self.current_mode = "auto_nav"
+        self.current_mode = "slam_only"
         self.current_map = "small_warehouse"
         self.started_at = datetime.now(timezone.utc)
 
@@ -200,6 +533,11 @@ class WareGVBrigeNode(Node):
             "/robot_operator/speak_device",
             10,
         )
+
+        # -------------------------------------------------
+        # Mode switcher
+        # -------------------------------------------------
+        self.mode_switcher = ModeSwitcher(self)
 
         self.get_logger().info(
             "BearGV ROS 2 REST Bridge Node Initialized."
@@ -423,6 +761,7 @@ class WareGVBrigeNode(Node):
         roots = [
             self.map_directory,
             self.map_directory.parent,
+            LOADED_MAP_DIR,
         ]
 
         checked = set()
@@ -457,23 +796,47 @@ class WareGVBrigeNode(Node):
 
         root = self.map_directory
 
-        if not root.exists():
-            return []
+        if root.exists():
+            try:
+                for yaml_path in root.rglob("*.yaml"):
+                    if yaml_path.is_file():
+                        names.add(yaml_path.stem)
 
-        try:
-            for yaml_path in root.rglob("*.yaml"):
-                if yaml_path.is_file():
-                    names.add(yaml_path.stem)
+                for yaml_path in root.rglob("*.yml"):
+                    if yaml_path.is_file():
+                        names.add(yaml_path.stem)
+            except OSError as exc:
+                self.get_logger().warning(
+                    f"Could not scan map directory: {exc}"
+                )
 
-            for yaml_path in root.rglob("*.yml"):
-                if yaml_path.is_file():
-                    names.add(yaml_path.stem)
+        # Also include the loaded maps directory.
+        if LOADED_MAP_DIR.exists():
+            try:
+                for yaml_path in LOADED_MAP_DIR.glob("*.yaml"):
+                    if yaml_path.is_file():
+                        names.add(yaml_path.stem)
+                for yaml_path in LOADED_MAP_DIR.glob("*.yml"):
+                    if yaml_path.is_file():
+                        names.add(yaml_path.stem)
+            except OSError as exc:
+                self.get_logger().warning(
+                    f"Could not scan loaded map directory: {exc}"
+                )
 
-        except OSError as exc:
-            self.get_logger().warning(
-                f"Could not scan map directory: {exc}"
-            )
+        return sorted(names)
 
+    def list_loaded_map_names(self) -> List[str]:
+        """
+        Returns only maps that were explicitly uploaded to LOADED_MAP_DIR
+        (used when AMCL needs a fixed map).
+        """
+        LOADED_MAP_DIR.mkdir(parents=True, exist_ok=True)
+        names = set()
+        for path in LOADED_MAP_DIR.glob("*.yaml"):
+            names.add(path.stem)
+        for path in LOADED_MAP_DIR.glob("*.yml"):
+            names.add(path.stem)
         return sorted(names)
 
     def get_map_info(self, name: str) -> Dict[str, Any]:
@@ -498,7 +861,7 @@ class WareGVBrigeNode(Node):
                 "image": None,
                 "detail": (
                     f"YAML file for map '{safe_name}' was not found. "
-                    f"Searched under '{self.map_directory}'."
+                    f"Searched under '{self.map_directory}' and '{LOADED_MAP_DIR}'."
                 ),
             }
 
@@ -524,7 +887,7 @@ class WareGVBrigeNode(Node):
         msg = String()
         msg.data = profile_str
         self.profile_pub.publish(msg)
-        
+
     def request_speech(self, text: str):
         msg = String()
         msg.data = text
@@ -930,7 +1293,7 @@ class WareGVBrigeNode(Node):
 
 app = FastAPI(
     title="WareGV Autonomous Rover API",
-    version="1.1",
+    version="1.2",
 )
 
 app.add_middleware(
@@ -1034,48 +1397,26 @@ async def get_pose_compat():
 @app.post("/system/mode")
 async def set_mode(req: ModeRequest):
     if ros_node is None:
-        raise HTTPException(
-            status_code=503,
-            detail="ROS node is not ready",
-        )
+        raise HTTPException(status_code=503, detail="ROS node is not ready")
 
+    mode = (req.mode or "").strip()
     map_name = (req.map_name or "").strip()
 
-    # New-map / SLAM modes are allowed to have an empty map name.
-    # Existing-map/autonomous modes must reference a real map.
-    mode_lower = req.mode.lower()
+    if ros_node.mode_switcher.is_busy():
+        raise HTTPException(status_code=409, detail="A deployment is already running.")
 
-    existing_map_required = (
-        "fixed" in mode_lower
-        or "update" in mode_lower
-        or mode_lower in {
-            "auto_nav",
-            "autonomous",
-            "autonomous_driving",
-        }
-    )
-
-    if existing_map_required and map_name:
-        info = ros_node.get_map_info(map_name)
-
-        if not info["exists"]:
-            raise HTTPException(
-                status_code=404,
-                detail=info["detail"],
-            )
-
-    ros_node.current_mode = req.mode
-    ros_node.current_map = map_name
-
-    ros_node.get_logger().info(
-        f"System mode switched: "
-        f"{req.mode}, map: {map_name or '<new-map>'}"
-    )
+    try:
+        ros_node.mode_switcher.deploy(mode, map_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     return {
         "ok": True,
-        "mode": ros_node.current_mode,
-        "map_name": ros_node.current_map,
+        "mode": mode,
+        "map_name": map_name,
+        "status": "deploying",
     }
 
 
@@ -1090,7 +1431,15 @@ async def get_mode():
     return {
         "mode": ros_node.current_mode,
         "map_name": ros_node.current_map,
+        "deployment": ros_node.mode_switcher.status(),
     }
+
+
+@app.get("/system/mode/status")
+async def get_mode_status():
+    if ros_node is None:
+        raise HTTPException(status_code=503, detail="ROS node is not ready")
+    return ros_node.mode_switcher.status()
 
 
 # =========================================================
@@ -1117,6 +1466,16 @@ async def list_maps():
         "map_directory": str(
             ros_node.map_directory
         ),
+    }
+
+
+@app.get("/maps/loaded")
+async def list_loaded_maps():
+    if ros_node is None:
+        raise HTTPException(status_code=503, detail="ROS node is not ready")
+    return {
+        "maps": [{"name": n} for n in ros_node.list_loaded_map_names()],
+        "directory": str(LOADED_MAP_DIR),
     }
 
 
@@ -1428,7 +1787,7 @@ async def helio_state(
 
     if ros_node and req.state:
         ros_node.set_profile(req.state)
-        
+
     if ros_node and req.event == "speaking_start" and req.text:
         ros_node.request_speech(req.text)
 
