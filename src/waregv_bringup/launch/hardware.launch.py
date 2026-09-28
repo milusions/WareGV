@@ -241,7 +241,7 @@ def generate_launch_description():
             waregv_controller,
             waregv_mapping,
             waregv_navigation,
-            waregv_suite,
+            
         ],
     )
 
@@ -256,6 +256,7 @@ def generate_launch_description():
 
             # 1) Start user interfaces first
             waregv_user_interfaces,
+            waregv_suite,
 
             # 2) Then start everything else after the delay
             delayed_stack,
