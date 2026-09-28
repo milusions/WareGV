@@ -18,12 +18,15 @@ class ArduinoNavBridge(Node):
         # Config parameters
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
+        # How often (seconds) to poll for a valid IP until we find one
+        self.declare_parameter('ip_poll_period_sec', 2.0)
 
         port = self.get_parameter('port').value
         baud = self.get_parameter('baudrate').value
+        ip_poll_period = float(self.get_parameter('ip_poll_period_sec').value)
 
         qt_link.init(port, baud)
-        
+
         # State tracking
         self.current_goal_status = None
         self.active_bt_node = None
@@ -32,9 +35,9 @@ class ArduinoNavBridge(Node):
 
         # Subscribe to the Nav2 action server status
         self.status_sub = self.create_subscription(
-            GoalStatusArray, 
-            '/navigate_to_pose/_action/status', 
-            self.status_cb, 
+            GoalStatusArray,
+            '/navigate_to_pose/_action/status',
+            self.status_cb,
             10
         )
 
@@ -53,21 +56,48 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # Initialize state with IP address included
+        # --- IP discovery timer ---------------------------------------------
+        # Poll for a valid IP address; once we have one, notify Qt and stop.
+        # This handles the common case where the network interface isn't up
+        # yet at boot time, so __init__'s first send_state might carry ip=None.
+        qt_link.send_to_qt({"ip": "Fetching ip..."})
+        self.ip_timer = self.create_timer(ip_poll_period, self.ip_timer_cb)
+
+        # Initialize state with whatever IP we have right now (may be None).
+       
         self.send_state("WareGV", "", "")
         self.publish_media("initialized.mp4")
+
+    def ip_timer_cb(self):
+        """Poll for a valid IP; send it to Qt and cancel the timer once found."""
+        ip = self.get_ip_address()
+        if ip:
+            try:
+                qt_link.send_to_qt({"ip": ip})
+                self.get_logger().info(f"IP address resolved and sent to Qt: {ip}")
+            except Exception as e:
+                self.get_logger().warn(f"Failed to send IP to Qt: {e}")
+
+            # We have what we need - stop polling.
+            if self.ip_timer is not None:
+                self.ip_timer.cancel()
+                self.destroy_timer(self.ip_timer)
+                self.ip_timer = None
+        else:
+            self.get_logger().debug("IP not available yet, will retry...")
 
     def get_ip_address(self):
         """Helper to get the primary IP address of the device."""
         try:
             # Connects to a dummy external address to find the preferred local IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.5)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
             return ip
         except Exception:
-            return "127.0.0.1" # Fallback if no network
+            return None  # Fallback if no network
 
     def status_cb(self, msg: GoalStatusArray):
         if not msg.status_list:
@@ -85,13 +115,13 @@ class ArduinoNavBridge(Node):
     def bt_log_cb(self, msg: BehaviorTreeLog):
         if not msg.event_log:
             return
-            
+
         changed = False
         for event in msg.event_log:
             if event.current_status == 'RUNNING':
                 self.active_bt_node = event.node_name
                 changed = True
-                
+
         if changed:
             self.evaluate_and_send_state()
 
@@ -112,7 +142,7 @@ class ArduinoNavBridge(Node):
             # Drop down into minute BT node details if available
             if self.active_bt_node:
                 node_name = self.active_bt_node
-                
+
                 # Regex matching logic mirroring your app.js classifications
                 if re.search(r"recover|spin|back ?up|wait|clear ?costmap|assisted_teleop", node_name, re.IGNORECASE):
                     title = "RECOVERING"
@@ -146,7 +176,7 @@ class ArduinoNavBridge(Node):
             subtitle = "Destination reached"
             action = "none"
             media_file = "arrived.mp4"
-            self.active_bt_node = None # Reset BT active node
+            self.active_bt_node = None  # Reset BT active node
 
         elif self.current_goal_status == GoalStatus.STATUS_ABORTED:
             title = "NAV ABORTED"
@@ -175,7 +205,7 @@ class ArduinoNavBridge(Node):
             "subtitle": subtitle[:35],  # Capped for safety on small displays
             "action": action
         }
-        
+
         if state_dict != self.last_sent_state:
             qt_link.send_to_qt(state_dict)
             self.last_sent_state = state_dict
@@ -190,6 +220,7 @@ class ArduinoNavBridge(Node):
         #     self.last_sent_media = filename
         #     self.get_logger().info(f"Triggered media playback for state: {filename}")
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = ArduinoNavBridge()
@@ -200,6 +231,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
