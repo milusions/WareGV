@@ -35,6 +35,7 @@ from rclpy.action import ActionClient
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import NavigateToPose, FollowWaypoints
 from std_msgs.msg import String
+from std_srvs.srv import Empty
 
 from tf2_ros import Buffer, TransformListener, TransformException
 
@@ -181,6 +182,19 @@ class BearGVBridgeNode(Node):
             self,
             FollowWaypoints,
             "follow_waypoints",
+        )
+
+        # -------------------------------------------------
+        # SLAM Toolbox reset clients
+        # -------------------------------------------------
+        self.slam_reset_client = self.create_client(
+            Empty,
+            "/slam_toolbox/reset",
+        )
+
+        self.slam_clear_client = self.create_client(
+            Empty,
+            "/slam_toolbox/clear_changes",
         )
 
         # -------------------------------------------------
@@ -834,6 +848,84 @@ class BearGVBridgeNode(Node):
         return cancelled
 
     # =====================================================
+    # SLAM reset (clear map, restart from scratch)
+    # =====================================================
+
+    def reset_slam(self) -> Dict[str, Any]:
+        """
+        Clear the SLAM map and restart mapping with the rover's
+        current physical location treated as the new origin.
+
+        Steps:
+          1. Cancel any active Nav2 goals so nothing re-plans against
+             the old map while we are resetting.
+          2. Publish a zero Twist so the rover is stationary.
+          3. Call SLAM Toolbox's /slam_toolbox/reset service, which
+             drops the pose graph and starts a fresh map.
+          4. Publish /initialpose at (0, 0, 0) so the new map's
+             origin coincides with the rover's current position.
+        """
+
+        result: Dict[str, Any] = {
+            "ok": True,
+            "cancelled_goals": [],
+            "reset_called": False,
+            "initial_pose_published": False,
+            "detail": "",
+        }
+
+        # 1) Stop any in-flight navigation.
+        try:
+            result["cancelled_goals"] = self.cancel_all_goals()
+        except Exception as exc:
+            self.get_logger().warning(
+                f"Could not cancel goals before SLAM reset: {exc}"
+            )
+
+        # 2) Make sure the rover is not moving.
+        try:
+            self.cmd_vel_pub.publish(Twist())
+        except Exception:
+            pass
+
+        # 3) Ask SLAM Toolbox to reset.
+        #    The service is optional — older SLAM Toolbox builds may
+        #    not expose it. If it is missing we still publish the
+        #    initial pose so the map origin is re-anchored.
+        if self.slam_reset_client.wait_for_service(timeout_sec=2.0):
+            try:
+                future = self.slam_reset_client.call_async(Empty.Request())
+                result["reset_called"] = True
+                self.get_logger().info(
+                    "SLAM Toolbox reset service called."
+                )
+            except Exception as exc:
+                result["ok"] = False
+                result["detail"] = f"SLAM reset service failed: {exc}"
+                self.get_logger().error(result["detail"])
+        else:
+            result["detail"] = (
+                "SLAM Toolbox reset service (/slam_toolbox/reset) "
+                "not available; map origin was re-anchored only."
+            )
+            self.get_logger().warning(result["detail"])
+
+        # 4) Anchor the new map at the rover's current position.
+        #    SLAM Toolbox treats /initialpose as the new map origin
+        #    after a reset, so (0,0,0) here means "here and now".
+        try:
+            self.set_initial_pose(0.0, 0.0, 0.0)
+            result["initial_pose_published"] = True
+        except Exception as exc:
+            result["ok"] = False
+            result["detail"] = (
+                (result["detail"] + " " if result["detail"] else "")
+                + f"Could not publish initial pose: {exc}"
+            )
+
+        return result
+
+    # =====================================================
     # Map archive (real files only)
     # =====================================================
 
@@ -1329,6 +1421,34 @@ async def abort_mission():
         raise HTTPException(
             status_code=500,
             detail=str(exc),
+        )
+
+
+# =========================================================
+# SLAM reset — clear map, restart from scratch
+# =========================================================
+
+@app.post("/slam/reset")
+async def reset_slam():
+    """
+    Clear the SLAM map and restart mapping with the rover's
+    current location treated as the new origin (0, 0, 0).
+
+    Returns a summary of what was done.
+    """
+    if ros_node is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ROS node is not ready",
+        )
+
+    try:
+        result = ros_node.reset_slam()
+        return result
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"SLAM reset failed: {exc}",
         )
 
 
