@@ -1,10 +1,14 @@
 import json
 import os
-import numpy as np
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    IncludeLaunchDescription,
+    TimerAction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.launch_description_sources.frontend_launch_description_source import (
     FrontendLaunchDescriptionSource,
@@ -19,6 +23,9 @@ def generate_launch_description():
     waregv_bringup_dir = get_package_share_directory("waregv_bringup")
     rosbridge_dir = get_package_share_directory("rosbridge_server")
 
+    # ------------------------------------------------------------------
+    # Launch arguments
+    # ------------------------------------------------------------------
     max_linear_velocity_arg = DeclareLaunchArgument(
         name="max_linear_velocity", default_value="0.30"
     )
@@ -50,6 +57,9 @@ def generate_launch_description():
         },
     }
 
+    # ------------------------------------------------------------------
+    # Description
+    # ------------------------------------------------------------------
     waregv_description_launch_file_path = os.path.join(
         get_package_share_directory("waregv_description"),
         "launch",
@@ -60,6 +70,9 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
+    # ------------------------------------------------------------------
+    # Hardware
+    # ------------------------------------------------------------------
     waregv_hardware_launch_file_path = os.path.join(
         get_package_share_directory("waregv_hardware"), "launch", "hardware.launch.py"
     )
@@ -68,6 +81,9 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
+    # ------------------------------------------------------------------
+    # Twist mux
+    # ------------------------------------------------------------------
     twist_mux_node_config_filepath = os.path.join(
         waregv_bringup_dir, "config", "twist_mux.yaml"
     )
@@ -77,9 +93,12 @@ def generate_launch_description():
         name="twist_mux",
         parameters=[twist_mux_node_config_filepath, {"use_stamped": False}],
         remappings=[("/cmd_vel_out", "/cmd_vel_unstamped")],
-        output="screen"
+        output="screen",
     )
-    
+
+    # ------------------------------------------------------------------
+    # Controller
+    # ------------------------------------------------------------------
     waregv_controller_launch_file_path = os.path.join(
         get_package_share_directory("waregv_controller"),
         "launch",
@@ -95,20 +114,26 @@ def generate_launch_description():
             "track_width": track_width_conf,
         }.items(),
     )
-    
-    waregv_odometry_launch_file_path = os.path.join(
-            get_package_share_directory("waregv_odometry"),
-            "launch",
-            "odometry.launch.py",
-        )
-    waregv_odometry = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
-            launch_arguments={
-                "use_sim_time": use_sim_time,
-                "wheel_radius": wheel_radius_conf,
-            }.items(),
-        )
 
+    # ------------------------------------------------------------------
+    # Odometry
+    # ------------------------------------------------------------------
+    waregv_odometry_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_odometry"),
+        "launch",
+        "odometry.launch.py",
+    )
+    waregv_odometry = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_odometry_launch_file_path),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "wheel_radius": wheel_radius_conf,
+        }.items(),
+    )
+
+    # ------------------------------------------------------------------
+    # Mapping
+    # ------------------------------------------------------------------
     waregv_mapping_launch_file_path = os.path.join(
         get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
     )
@@ -117,6 +142,9 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
+    # ------------------------------------------------------------------
+    # Navigation
+    # ------------------------------------------------------------------
     waregv_navigation_launch_file_path = os.path.join(
         get_package_share_directory("waregv_navigation"),
         "launch",
@@ -131,6 +159,9 @@ def generate_launch_description():
         }.items(),
     )
 
+    # ------------------------------------------------------------------
+    # Rosbridge
+    # ------------------------------------------------------------------
     rosbridge_node = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(
             os.path.join(rosbridge_dir, "launch", "rosbridge_websocket_launch.xml")
@@ -142,6 +173,9 @@ def generate_launch_description():
         }.items(),
     )
 
+    # ------------------------------------------------------------------
+    # Foxglove bridge
+    # ------------------------------------------------------------------
     foxglove_bridge = GroupAction(
         actions=[
             IncludeLaunchDescription(
@@ -164,38 +198,66 @@ def generate_launch_description():
         scoped=True,
         forwarding=True,
     )
-    waregv_suite_launch_file_path = os.path.join(
-                    get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
-                )
-    waregv_suite = IncludeLaunchDescription(
-                    PythonLaunchDescriptionSource(waregv_suite_launch_file_path),
-                    launch_arguments={"use_sim_time": use_sim_time}.items(),
-                )
-    waregv_user_interfaces_launch_file_path = os.path.join(
-                    get_package_share_directory("waregv_user_interfaces"), "launch", "user_interfaces.launch.py"
-                )
-    waregv_user_interfaces = IncludeLaunchDescription(
-                    PythonLaunchDescriptionSource(waregv_user_interfaces_launch_file_path),
-                    launch_arguments={"use_sim_time": use_sim_time}.items(),
-                )
 
-    return LaunchDescription(
-        [
-            max_linear_velocity_arg,
-            max_angular_velocity_arg,
-            wheel_radius_arg,
-            track_width_arg,
-            map_name_arg,
+    # ------------------------------------------------------------------
+    # Suite
+    # ------------------------------------------------------------------
+    waregv_suite_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
+    )
+    waregv_suite = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_suite_launch_file_path),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
+    )
+
+    # ------------------------------------------------------------------
+    # User interfaces (must start FIRST)
+    # ------------------------------------------------------------------
+    waregv_user_interfaces_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_user_interfaces"),
+        "launch",
+        "user_interfaces.launch.py",
+    )
+    waregv_user_interfaces = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_user_interfaces_launch_file_path),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
+    )
+
+    # ------------------------------------------------------------------
+    # Everything else starts only AFTER user_interfaces has come up.
+    # TimerAction is used because IncludeLaunchDescription does not expose
+    # a single process handle that OnProcessStart can attach to.
+    # Increase the period if your UI takes longer to initialise.
+    # ------------------------------------------------------------------
+    delayed_stack = TimerAction(
+        period=5.0,  # seconds — tune to your UI's startup time
+        actions=[
             waregv_description,
             rosbridge_node,
             foxglove_bridge,
-            waregv_user_interfaces,
             waregv_hardware,
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
             waregv_mapping,
             waregv_navigation,
-            waregv_suite
+            waregv_suite,
+        ],
+    )
+
+    return LaunchDescription(
+        [
+            # Arguments
+            max_linear_velocity_arg,
+            max_angular_velocity_arg,
+            wheel_radius_arg,
+            track_width_arg,
+            map_name_arg,
+
+            # 1) Start user interfaces first
+            waregv_user_interfaces,
+
+            # 2) Then start everything else after the delay
+            delayed_stack,
         ]
     )
