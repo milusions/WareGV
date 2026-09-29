@@ -25,7 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'wheel_odometry_node = waregv_odometry.wheel_odometry_node:main',
-            'odom_euler_node = waregv_odometry.odom_euler_node:main',
+          
       
         ],
     },

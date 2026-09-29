@@ -45,20 +45,6 @@ def generate_launch_description():
         remappings=[('odometry/filtered', '/odom')],
     )
 
-    odom_euler = Node(
-        package='waregv_odometry',
-        executable='odom_euler_node',
-        name='odom_euler',
-        output='screen',
-        parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
-    )
-    
-    yaw_logger = Node(
-        package='waregv_odometry',
-        executable='yaw_logger',
-        name='yaw_logger',
-        output='screen',
-        parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
-    )
+  
 
-    return LaunchDescription(args + [wheel_odometry, ekf_node, odom_euler])
+    return LaunchDescription(args + [wheel_odometry, ekf_node])
