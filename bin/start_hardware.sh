@@ -68,6 +68,8 @@ echo -e "  ${PRIMARY}[SOURCING]${RESET}   ${DIM_GRAY}Loading ROS 2 Jazzy environ
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
+python3 ~/waregv/waregv_ws/src/waregv_user_interfaces/waregv_user_interfaces/nav2_status_node.py &
+sleep 1
 # Execute launch in background
 stdbuf -oL -eL ros2 launch waregv_bringup hardware.launch.py \
     max_linear_velocity:="$MAX_LINEAR_VELOCITY" \
