@@ -2,7 +2,7 @@ import os
 from glob import glob
 from setuptools import find_packages, setup
 
-package_name = 'waregv_suite'
+package_name = 'waregv_vision'
 
 def package_files(directory):
     paths = []
@@ -24,11 +24,12 @@ for folder in ['launch']:
             install_dir = os.path.join('share', package_name, os.path.dirname(file_path))
             data_files.append((install_dir, [file_path]))
 
+
 setup(
     name=package_name,
     version='0.0.0',
     packages=find_packages(exclude=['test']),
-    data_files=data_files,  # Uses the data_files list constructed above
+    data_files=data_files,
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='milon',
@@ -42,7 +43,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "waregv_suite_backend = waregv_suite.main:main"
+            "aruco_node=waregv_vision.aruco_node:main",
+            "camera_streamer=waregv_vision.camera_streamer:main"
         ],
     },
 )

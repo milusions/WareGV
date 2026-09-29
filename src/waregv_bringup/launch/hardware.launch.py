@@ -178,6 +178,14 @@ def generate_launch_description():
                     PythonLaunchDescriptionSource(waregv_user_interfaces_launch_file_path),
                     launch_arguments={"use_sim_time": use_sim_time}.items(),
                 )
+    
+    waregv_vision_launch_file_path = os.path.join(
+                        get_package_share_directory("waregv_vision"), "launch", "vision.launch.py"
+                    )
+    waregv_vision = IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(waregv_vision_launch_file_path),
+                        launch_arguments={"use_sim_time": use_sim_time}.items(),
+                    )
 
     return LaunchDescription(
         [
@@ -189,13 +197,14 @@ def generate_launch_description():
             waregv_description,
             rosbridge_node,
             foxglove_bridge,
-            waregv_user_interfaces,
+            # waregv_user_interfaces,
             waregv_hardware,
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
             waregv_mapping,
             waregv_navigation,
-            waregv_suite
+            waregv_suite,
+            waregv_vision
         ]
     )
