@@ -78,13 +78,18 @@ class WheelOdometryNode(Node):
         self.declare_parameter('auto_bias', True)
         self.declare_parameter('bias_time', 2.0)           # s of standstill before learning
         self.declare_parameter('bias_alpha', 0.002)        # slow average -> low noise
+        # NEW: faster re-convergence when the consistency check flags persistent mismatch
+        self.declare_parameter('bias_reconverge_alpha', 0.02)
+        self.declare_parameter('bias_reconverge_windows', 3)  # consecutive mismatches to trigger
         self.declare_parameter('diag_window', 1.0)         # s
         self.declare_parameter('diag_thresh_deg', 2.0)
         self.declare_parameter('imu_output_frame', 'base_footprint')
         self.declare_parameter('imu_output_rate_hz', 50.0)
-        self.declare_parameter('gyro_var', 1e-4)
-        self.declare_parameter('wheel_vx_var', 4e-4)
-        self.declare_parameter('wheel_wz_var', 5e-2)
+        # Tuning: gyro is clean, so trust it more. Wheel yaw is reliable on diff-drive,
+        # so give it real weight instead of letting the EKF freely drift between IMU updates.
+        self.declare_parameter('gyro_var', 6e-5)
+        self.declare_parameter('wheel_vx_var', 3e-4)
+        self.declare_parameter('wheel_wz_var', 1.5e-2)
 
         gp = lambda n: self.get_parameter(n).value
         self.r = float(gp('wheel_radius'))
@@ -105,6 +110,8 @@ class WheelOdometryNode(Node):
         self.auto_bias = bool(gp('auto_bias'))
         self.bias_time = float(gp('bias_time'))
         self.bias_alpha = float(gp('bias_alpha'))
+        self.bias_reconverge_alpha = float(gp('bias_reconverge_alpha'))
+        self.bias_reconverge_windows = int(gp('bias_reconverge_windows'))
         self.diag_window = float(gp('diag_window'))
         self.diag_thresh = math.radians(float(gp('diag_thresh_deg')))
         self.imu_frame = str(gp('imu_output_frame'))
@@ -143,6 +150,8 @@ class WheelOdometryNode(Node):
         self.diag_t0 = None
         self.diag_gyro0 = 0.0
         self.diag_orient0 = 0.0
+        # NEW: track consecutive mismatched windows for bias re-convergence
+        self.consecutive_mismatch = 0
 
         self.wheel_pub = self.create_publisher(Odometry, '/wheel/odom', 10)
         self.imu_pub = self.create_publisher(Imu, '/imu/filtered', qos_profile_sensor_data)
@@ -305,13 +314,21 @@ class WheelOdometryNode(Node):
         still_for = 0.0 if self.still_since is None else t - self.still_since
 
         # ---- 4. bias learning (slow, low-noise) ----
+        # Normal path: slow average. If the consistency check has flagged several
+        # consecutive mismatched windows, accelerate convergence to catch slow thermal
+        # drift that the Hampel filter cannot see (it is not an outlier sample-by-sample).
         if (self.auto_bias and raw is not None and not replaced and
                 still_for >= self.bias_time and abs(raw - self.bias) < 0.15):
-            self.bias += self.bias_alpha * (raw - self.bias)
+            alpha = self.bias_alpha
+            if self.consecutive_mismatch >= self.bias_reconverge_windows:
+                alpha = self.bias_reconverge_alpha
+            self.bias += alpha * (raw - self.bias)
 
         # ---- 5. ZUPT: no yaw creep while parked ----
-        if self.auto_zupt and still_for >= self.zupt_time and abs(rate) < self.zupt_rate:
-            rate = 0.0
+        # Hysteresis: enter at zupt_rate, exit at 2x so we don't chatter.
+        if self.auto_zupt and still_for >= self.zupt_time:
+            if abs(rate) < self.zupt_rate:
+                rate = 0.0
 
         # ---- 6. trapezoidal integration, gap tolerant ----
         if dt_ok:
@@ -347,7 +364,11 @@ class WheelOdometryNode(Node):
         self.debug_pub.publish(dbg)
 
     def _consistency_check(self, t: float):
-        """Compare yaw gained by the rate path vs orientation over a window; log heading."""
+        """Compare yaw gained by the rate path vs orientation over a window; log heading.
+
+        Also tracks consecutive mismatched windows so bias learning can speed up
+        when a slow, sustained gyro bias drift is suspected.
+        """
         if self.source != 'gyro' or not self.have_orient_rate:
             return
         if self.diag_t0 is None:
@@ -364,6 +385,9 @@ class WheelOdometryNode(Node):
             self.get_logger().warn(
                 f'Yaw mismatch over {self.diag_window:.1f}s: rate path {math.degrees(d_gyro):.1f} deg '
                 f'vs orientation {math.degrees(d_orient):.1f} deg at heading {heading:.0f} deg')
+            self.consecutive_mismatch += 1
+        else:
+            self.consecutive_mismatch = 0
         self.diag_t0 = t
         self.diag_gyro0 = self.yaw_rate_int
         self.diag_orient0 = self.yaw_orient
