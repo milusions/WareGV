@@ -60,7 +60,7 @@ def generate_launch_description():
         name="wheel_radius", default_value="0.036"
     )
     track_width_arg = DeclareLaunchArgument(
-        name="track_width", default_value="0.3676"
+        name="track_width", default_value="0.192"
     )
     map_name_arg = DeclareLaunchArgument(name="map_name", default_value="map")
 
