@@ -15,54 +15,53 @@ class DiffDriveKinematicsRelay(Node):
         self.declare_parameter('track_width', 0.192)   # Distance between left and right wheels (meters)
         self.declare_parameter('wheel_radius', 0.036)  # Radius of the wheels (meters)
 
+        # Deadman switch timeout (seconds)
+        self.declare_parameter('cmd_vel_timeout', 1.0)
+
         # Retrieve parameter values
         self.track_width = self.get_parameter('track_width').value
         self.wheel_radius = self.get_parameter('wheel_radius').value
+        self.cmd_vel_timeout = self.get_parameter('cmd_vel_timeout').value
 
         # Subscriber for un-stamped velocity commands
-      
         self.cmd_sub = self.create_subscription(
             Twist,
             '/cmd_vel_unstamped',
             self.cmd_vel_callback,
             10
-         )
+        )
 
         # Publisher for motor system command array [fl, fr, rl, rr]
-        if not self.use_sim_time:   
-         self.motor_pub = self.create_publisher(
-            Float64MultiArray,
-            '/motor_system/commands',
-            10
-        )
+        if not self.use_sim_time:
+            self.motor_pub = self.create_publisher(
+                Float64MultiArray,
+                '/motor_system/commands',
+                10
+            )
         else:
             self.motor_pub = self.create_publisher(
-                        Float64MultiArray,
-                        '/velocity_controller/commands',
-                        10
-                    )
+                Float64MultiArray,
+                '/velocity_controller/commands',
+                10
+            )
+
         self.declare_parameter('max_linear_vel', 0.11)
-        self.declare_parameter('max_angular_vel',0.35)
-         
-           
-           
+        self.declare_parameter('max_angular_vel', 0.35)
+
+        # Deadman switch state
+        self.last_cmd_time = self.get_clock().now()
+        self.deadman_triggered = True  # Start stopped until first command arrives
+
+        # Timer for deadman switch check (runs at 10 Hz)
+        self.deadman_timer = self.create_timer(0.1, self.deadman_check)
+
         self.get_logger().info("Diff Drive Kinematics Relay Node has started.")
+        self.get_logger().info(
+            f"Deadman switch timeout set to {self.cmd_vel_timeout} seconds."
+        )
 
-    def cmd_vel_callback(self, msg: Twist):
-        max_lin = self.get_parameter('max_linear_vel').value
-        max_ang = self.get_parameter('max_angular_vel').value
-        
-        # Extract linear velocity (x) and angular velocity (z, anticlockwise positive)
-        v = msg.linear.x
-        if(math.fabs(v)> max_lin):
-            v = (v/math.fabs(v))*max_lin
-            
-            
-        omega = msg.angular.z
-        
-        if(math.fabs(omega)> max_ang):
-                    omega = (omega/math.fabs(omega))*max_ang
-
+    def _publish_wheel_commands(self, v, omega):
+        """Compute inverse kinematics and publish wheel velocity commands."""
         # 4-Wheel Differential Drive Inverse Kinematics:
         # Left and right side linear velocities (v = v_linear +/- (omega * track_width / 2))
         v_left = v - (omega * self.track_width / 2.0)
@@ -83,11 +82,48 @@ class DiffDriveKinematicsRelay(Node):
         command_msg.data = [fl, fr, rl, rr]
         self.motor_pub.publish(command_msg)
 
+    def cmd_vel_callback(self, msg: Twist):
+        max_lin = self.get_parameter('max_linear_vel').value
+        max_ang = self.get_parameter('max_angular_vel').value
+
+        # Extract linear velocity (x) and angular velocity (z, anticlockwise positive)
+        v = msg.linear.x
+        if math.fabs(v) > max_lin:
+            v = (v / math.fabs(v)) * max_lin
+
+        omega = msg.angular.z
+        if math.fabs(omega) > max_ang:
+            omega = (omega / math.fabs(omega)) * max_ang
+
+        # Reset deadman switch timer
+        self.last_cmd_time = self.get_clock().now()
+        if self.deadman_triggered:
+            self.get_logger().info("Deadman switch reset: received new cmd_vel.")
+            self.deadman_triggered = False
+
+        self._publish_wheel_commands(v, omega)
+
+    def deadman_check(self):
+        """Periodically check whether a cmd_vel has been received recently."""
+        now = self.get_clock().now()
+        elapsed = (now - self.last_cmd_time).nanoseconds / 1e9
+
+        if elapsed > self.cmd_vel_timeout:
+            if not self.deadman_triggered:
+                self.get_logger().warn(
+                    f"Deadman switch triggered! No cmd_vel for {elapsed:.2f}s. "
+                    "Publishing stop command."
+                )
+                self.deadman_triggered = True
+
+            # Continuously publish zero velocity while timed out
+            self._publish_wheel_commands(0.0, 0.0)
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = DiffDriveKinematicsRelay()
-    
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
