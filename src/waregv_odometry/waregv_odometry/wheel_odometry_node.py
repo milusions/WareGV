@@ -61,7 +61,7 @@ class WheelOdometryNode(Node):
         super().__init__('wheel_odometry')
 
         self.declare_parameter('wheel_radius', 0.036)
-        self.declare_parameter('wheel_separation', 0.30)   # EFFECTIVE track width; calibrate
+        self.declare_parameter('wheel_separation', 0.192)   # EFFECTIVE track width; calibrate
         self.declare_parameter('left_sign', 1.0)
         self.declare_parameter('right_sign', 1.0)
         self.declare_parameter('yaw_rate_source', 'gyro')  # 'gyro' | 'orientation'
