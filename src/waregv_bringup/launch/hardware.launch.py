@@ -131,7 +131,7 @@ def generate_launch_description():
     # (the hardware must be publishing sensor data before anything else)
     # =========================================================
     joint_states_gate = _wait_for_topic("/joint_states", timeout=120.0)
-    imu_gate = _wait_for_topic("/imu/data", timeout=120.0)
+    imu_gate = _wait_for_topic("/imu_chassis", timeout=120.0)
 
     # =========================================================
     # STAGE 3 — Controller manager service readiness
