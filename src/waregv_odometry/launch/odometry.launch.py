@@ -48,4 +48,4 @@ def generate_launch_description():
 
   
 
-    return LaunchDescription(args+[ekf_node])
+    return LaunchDescription(args+[ekf_node,wheel_odometry])
