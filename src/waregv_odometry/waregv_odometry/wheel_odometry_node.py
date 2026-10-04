@@ -63,7 +63,7 @@ class WheelOdometryNode(Node):
         P('yaw_source', 'gyro')          # 'wheel' | 'gyro' | 'orientation'
         P('imu_topic', '/imu_chassis')
         P('gyro_sign', 1.0)               # -1 if IMU z points down
-        P('gyro_scale', 0.96585)              # true_angle / measured_angle (calibrate with 360 test)
+        P('gyro_scale', 0.97656)              # true_angle / measured_angle (calibrate with 360 test)
         P('gyro_bias_z', 0.0)             # used only if startup_bias_time <= 0
         P('startup_bias_time', 3.0)       # s of standstill to measure bias; 0 = use gyro_bias_z
         P('imu_timeout', 0.5)             # s without IMU data -> warn and hold heading
