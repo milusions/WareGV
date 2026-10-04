@@ -33,8 +33,8 @@ class WheelOnlyOdom(Node):
     def __init__(self):
         super().__init__('wheel_only_odom')
         P = self.declare_parameter
-        P('wheel_radius', 0.036)
-        P('wheel_separation', 0.192)    
+        P('wheel_radius', 0.03706)
+        P('wheel_separation', 0.72380)    
         P('left_sign', 1.0)
         P('right_sign', 1.0)
         P('left_scale', 1.0)            # optional per-side fix if straight line curves
@@ -62,7 +62,7 @@ class WheelOnlyOdom(Node):
         self.last_t = None
         self.last_pos = None
         
-        self.get_logger().info(f"############## WHEEL SEPERATION {self.sep} ##############")
+        self.get_logger().info(f"############## WHEEL SEPERATION {self.sep}, {self.r} ##############")
 
         self.pub = self.create_publisher(Odometry, str(g('odom_topic')), 20)
         self.tfb = TransformBroadcaster(self)
