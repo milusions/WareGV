@@ -31,7 +31,8 @@ def generate_launch_description():
             'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
             'wheel_radius': ParameterValue(LaunchConfiguration('wheel_radius'), value_type=float),
             'wheel_separation': ParameterValue(LaunchConfiguration('wheel_separation'), value_type=float),
-              'gyro_scale': 0.952,
+            'gyro_scale': 0.97656,
+            'ekf_mode': True,         
         }],
     )
 
@@ -47,4 +48,4 @@ def generate_launch_description():
 
   
 
-    return LaunchDescription(args+[])
+    return LaunchDescription(args+[ekf_node])
