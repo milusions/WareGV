@@ -1,51 +1,73 @@
 #!/usr/bin/env python3
 """
-Wheel-only odometry (STAGE 1). No IMU, no EKF, no filtering.
+Wheel odometry with a selectable YAW source (STAGE 2). No EKF, no filtering.
 
-Input : /joint_states   (velocity[] or position[] = [FL, FR, RL, RR])
-Output: /odom           nav_msgs/Odometry
-        TF odom -> base_footprint   (publish_tf:=true)
+Distance (x, y step) ALWAYS comes from the wheels.
+Heading comes from `yaw_source`:
+    'wheel'        wheel kinematics (stage 1 behaviour, unchanged)
+    'gyro'         integrated gyro z:  (raw - bias) * gyro_scale * gyro_sign
+    'orientation'  unwrapped yaw from the IMU quaternion (test only)
 
-Pose is integrated with exact arc geometry. Two numbers decide accuracy:
-  wheel_radius      -> distance accuracy   (calibrate with the straight test)
-  wheel_separation  -> rotation accuracy   (calibrate with the 360 test;
-                       on a skid-steer this is the EFFECTIVE width, bigger than the real one)
+Gyro bias is measured at startup: keep the robot STILL for `startup_bias_time`
+seconds after launching (the timer restarts if the wheels move). While waiting,
+no odometry is published in gyro mode.
 
-IMPORTANT: stop the EKF and the old wheel_odometry node first, otherwise two
-nodes publish odom -> base_footprint.
+All three yaws are always integrated and published on /yaw_debug (degrees,
+unwrapped, zeroed at start):  x = wheel, y = gyro, z = orientation
+so one run lets you compare them whichever source is active.
+
+IMPORTANT: stop the EKF and the old nodes first (only one odom -> base_footprint).
 """
 import math
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import JointState, Imu
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import TransformStamped, Vector3
 from tf2_ros import TransformBroadcaster
 
 
+def wrap_pi(a: float) -> float:
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+def quat_to_yaw(q) -> float:
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
 def sinc_half(a: float) -> float:
-    """sin(a/2)/(a/2), safe at 0 (exact arc -> chord correction)."""
     return 1.0 if abs(a) < 1e-9 else math.sin(a / 2.0) / (a / 2.0)
 
 
-class WheelOnlyOdom(Node):
+class WheelOdometryNode(Node):
     def __init__(self):
         super().__init__('wheel_only_odom')
         P = self.declare_parameter
         P('wheel_radius', 0.03706)
-        P('wheel_separation', 0.39598)    
+        P('wheel_separation', 0.39598)
         P('left_sign', 1.0)
         P('right_sign', 1.0)
-        P('left_scale', 1.0)            # optional per-side fix if straight line curves
+        P('left_scale', 1.0)
         P('right_scale', 1.0)
-        P('use_position', False)        # True: integrate encoder position deltas (rate-independent)
-        P('max_dt', 0.5)                # ignore gaps longer than this (s)
+        P('use_position', False)
+        P('max_dt', 0.5)
         P('odom_frame', 'odom')
         P('base_frame', 'base_footprint')
         P('publish_tf', True)
         P('joint_topic', '/joint_states')
         P('odom_topic', '/odom')
+        # --- yaw source switch ---
+        P('yaw_source', 'gyro')          # 'wheel' | 'gyro' | 'orientation'
+        P('imu_topic', '/imu_chassis')
+        P('gyro_sign', 1.0)               # -1 if IMU z points down
+        P('gyro_scale', 1.0)              # true_angle / measured_angle (calibrate with 360 test)
+        P('gyro_bias_z', 0.0)             # used only if startup_bias_time <= 0
+        P('startup_bias_time', 3.0)       # s of standstill to measure bias; 0 = use gyro_bias_z
+        P('imu_timeout', 0.5)             # s without IMU data -> warn and hold heading
+        P('log_yaw', True)
 
         g = lambda n: self.get_parameter(n).value
         self.r = float(g('wheel_radius'))
@@ -57,24 +79,122 @@ class WheelOnlyOdom(Node):
         self.odom_frame = str(g('odom_frame'))
         self.base_frame = str(g('base_frame'))
         self.publish_tf = bool(g('publish_tf'))
+        self.source = str(g('yaw_source'))
+        if self.source not in ('wheel', 'gyro', 'orientation'):
+            raise ValueError("yaw_source must be 'wheel', 'gyro' or 'orientation'")
+        self.gsign = float(g('gyro_sign'))
+        self.gscale = float(g('gyro_scale'))
+        self.bias = float(g('gyro_bias_z'))
+        self.bias_time = float(g('startup_bias_time'))
+        self.imu_timeout = float(g('imu_timeout'))
+        self.log_yaw = bool(g('log_yaw'))
 
+        # pose
         self.x = self.y = self.th = 0.0
         self.last_t = None
         self.last_pos = None
-        
-        self.get_logger().info(f"############## WHEEL SEPERATION {self.sep}, {self.r} ##############")
+        self.wheel_lin = self.wheel_ang = 0.0
+
+        # three unwrapped yaws (rad)
+        self.yaw_wheel = 0.0
+        self.yaw_gyro = 0.0
+        self.yaw_orient = 0.0
+        self.prev_used = None             # last value of the selected yaw used for pose
+
+        # imu state
+        self.last_imu_t = None
+        self.last_imu_clock = None
+        self.prev_rate = 0.0
+        self.last_orient = None
+        self.orient_rejects = 0
+        self.bias_done = (self.bias_time <= 0.0)
+        self.bias_sum = 0.0
+        self.bias_n = 0
+        self.bias_t0 = None
 
         self.pub = self.create_publisher(Odometry, str(g('odom_topic')), 20)
+        self.dbg = self.create_publisher(Vector3, '/yaw_debug', 10)
         self.tfb = TransformBroadcaster(self)
-        self.create_subscription(JointState, str(g('joint_topic')), self.cb, 20)
-        self.get_logger().info(
-            f'wheel_only_odom: r={self.r} sep={self.sep} '
-            f'mode={"position" if self.use_pos else "velocity"} tf={self.publish_tf}')
+        self.create_subscription(JointState, str(g('joint_topic')), self.joint_cb, 20)
+        self.create_subscription(Imu, str(g('imu_topic')), self.imu_cb, qos_profile_sensor_data)
+        if self.log_yaw:
+            self.create_timer(2.0, self._log)
 
-    def cb(self, msg: JointState):
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if t == 0.0:
-            t = self.get_clock().now().nanoseconds * 1e-9
+        self.get_logger().info(
+            f'wheel_only_odom: r={self.r} sep={self.sep} yaw_source={self.source} '
+            f'gyro_scale={self.gscale} gyro_sign={self.gsign} '
+            f'mode={"position" if self.use_pos else "velocity"}')
+        if self.source == 'gyro' and not self.bias_done:
+            self.get_logger().info(f'Keep the robot STILL for {self.bias_time:.0f}s (measuring gyro bias)')
+
+    # ---------- helpers ----------
+    def _stamp(self, stamp) -> float:
+        t = stamp.sec + stamp.nanosec * 1e-9
+        return t if t != 0.0 else self.get_clock().now().nanoseconds * 1e-9
+
+    def _log(self):
+        d = math.degrees
+        self.get_logger().info(
+            f'yaw deg  wheel={d(self.yaw_wheel):8.2f}  gyro={d(self.yaw_gyro):8.2f}  '
+            f'orient={d(self.yaw_orient):8.2f}  bias={self.bias:+.5f}  '
+            f'[using {self.source}]')
+
+    # ---------- IMU ----------
+    def imu_cb(self, msg: Imu):
+        t = self._stamp(msg.header.stamp)
+        dt = None if self.last_imu_t is None else t - self.last_imu_t
+        self.last_imu_t = t
+        self.last_imu_clock = self.get_clock().now()
+        dt_ok = dt is not None and 0.0 < dt < 0.5
+
+        # orientation yaw (with simple single-sample glitch rejection)
+        q = msg.orientation
+        if (msg.orientation_covariance[0] != -1.0 and
+                (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 0.5):
+            yaw = quat_to_yaw(q) * self.gsign
+            if self.last_orient is None:
+                self.last_orient = yaw
+            else:
+                d = wrap_pi(yaw - self.last_orient)
+                if abs(d) > 0.5:
+                    self.orient_rejects += 1
+                    if self.orient_rejects >= 5:
+                        self.last_orient = yaw
+                        self.orient_rejects = 0
+                else:
+                    self.orient_rejects = 0
+                    self.yaw_orient += d
+                    self.last_orient = yaw
+
+        raw = msg.angular_velocity.z
+        if not math.isfinite(raw):
+            return
+
+        # startup bias measurement (robot must be still)
+        if not self.bias_done:
+            still = abs(self.wheel_lin) < 0.01 and abs(self.wheel_ang) < 0.02
+            if not still:
+                self.bias_sum, self.bias_n, self.bias_t0 = 0.0, 0, None
+                return
+            if self.bias_t0 is None:
+                self.bias_t0 = t
+            self.bias_sum += raw
+            self.bias_n += 1
+            if t - self.bias_t0 >= self.bias_time and self.bias_n > 10:
+                self.bias = self.bias_sum / self.bias_n
+                self.bias_done = True
+                self.prev_rate = 0.0
+                self.get_logger().info(f'Gyro bias = {self.bias:+.6f} rad/s ({self.bias_n} samples). Go.')
+            return
+
+        rate = (raw - self.bias) * self.gscale * self.gsign
+        if dt_ok:
+            self.yaw_gyro += 0.5 * (self.prev_rate + rate) * dt
+        self.prev_rate = rate
+
+    # ---------- wheels ----------
+    def joint_cb(self, msg: JointState):
+        t = self._stamp(msg.header.stamp)
         dt = None if self.last_t is None else t - self.last_t
         self.last_t = t
 
@@ -101,17 +221,43 @@ class WheelOnlyOdom(Node):
             dl, dr = self.r * wl * dt, self.r * wr * dt
 
         ds = (dl + dr) / 2.0
-        dth = (dr - dl) / self.sep
+        dth_wheel = (dr - dl) / self.sep
+        self.yaw_wheel += dth_wheel
+        self.wheel_lin, self.wheel_ang = ds / dt, dth_wheel / dt
+
+        # ---- choose heading increment ----
+        if self.source == 'wheel':
+            dth = dth_wheel
+        else:
+            if self.source == 'gyro':
+                if not self.bias_done:
+                    return                      # still measuring bias: publish nothing
+                cur = self.yaw_gyro
+            else:
+                if self.last_orient is None:
+                    return
+                cur = self.yaw_orient
+            now = self.get_clock().now()
+            if (self.last_imu_clock is None or
+                    (now - self.last_imu_clock).nanoseconds * 1e-9 > self.imu_timeout):
+                self.get_logger().warn('IMU data stale: heading held', throttle_duration_sec=2.0)
+                dth = 0.0
+            elif self.prev_used is None:
+                dth = 0.0
+            else:
+                dth = cur - self.prev_used
+            self.prev_used = cur
+
         chord = ds * sinc_half(dth)
         self.x += chord * math.cos(self.th + dth / 2.0)
         self.y += chord * math.sin(self.th + dth / 2.0)
-        self.th += dth
-        self.th = math.atan2(math.sin(self.th), math.cos(self.th))
+        self.th = wrap_pi(self.th + dth)
 
         qz, qw = math.sin(self.th / 2.0), math.cos(self.th / 2.0)
+        stamp = msg.header.stamp if msg.header.stamp.sec else self.get_clock().now().to_msg()
 
         o = Odometry()
-        o.header.stamp = msg.header.stamp if msg.header.stamp.sec else self.get_clock().now().to_msg()
+        o.header.stamp = stamp
         o.header.frame_id = self.odom_frame
         o.child_frame_id = self.base_frame
         o.pose.pose.position.x = self.x
@@ -136,10 +282,15 @@ class WheelOnlyOdom(Node):
             tf.transform.rotation.w = qw
             self.tfb.sendTransform(tf)
 
+        v = Vector3()
+        v.x, v.y, v.z = (math.degrees(self.yaw_wheel), math.degrees(self.yaw_gyro),
+                         math.degrees(self.yaw_orient))
+        self.dbg.publish(v)
+
 
 def main():
     rclpy.init()
-    n = WheelOnlyOdom()
+    n = WheelOdometryNode()
     try:
         rclpy.spin(n)
     except KeyboardInterrupt:

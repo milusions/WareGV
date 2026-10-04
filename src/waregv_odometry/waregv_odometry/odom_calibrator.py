@@ -67,11 +67,14 @@ def main():
     ap.add_argument('--target', type=float, default=0.6, help='m (straight) or deg (turn)')
     ap.add_argument('--current', type=float, default=None, help='current radius or separation')
     ap.add_argument('--vmax', type=float, default=0.10)
-    ap.add_argument('--wmax', type=float, default=0.20)
+    ap.add_argument('--wmax', type=float, default=0.15)
+    ap.add_argument('--gyro', action='store_true', help='turn test: tune gyro_scale instead of wheel_separation')
     ap.add_argument('--odom', default='/odom')
     ap.add_argument('--cmd', default='/cmd_vel')
     a = ap.parse_args()
 
+    if not a.current:
+        ap.error('--current is required (radius, separation, or gyro_scale)')
     rclpy.init()
     n = Tracker(a.odom, a.cmd)
     threading.Thread(target=rclpy.spin, args=(n,), daemon=True).start()
@@ -117,12 +120,18 @@ def main():
             print(f'-> wheel_radius: {a.current} -> {a.current * meas / dist:.5f}')
     else:
         s = input('ACTUAL rotation in deg (360 test: 360 + overshoot, or 360 - undershoot; blank to skip): ').strip()
-        if s and a.current:
+        if s:
             meas = abs(float(s))
-            print(f'-> wheel_separation: {a.current} -> {a.current * abs(dyaw) / meas:.5f}')
+            ratio = abs(dyaw) / meas
+            print(f'odom/actual ratio = {ratio:.4f}')
+            if not (0.7 < ratio < 2.5):
+                print('Ratio implausible; check your measured angle. No suggestion made.')
+            elif a.gyro:
+                print(f'-> gyro_scale: {a.current} -> {a.current / ratio:.5f}')
+            else:
+                print(f'-> wheel_separation: {a.current} -> {a.current * ratio:.5f}')
     rclpy.shutdown()
 
 
 if __name__ == '__main__':
     main()
-    
