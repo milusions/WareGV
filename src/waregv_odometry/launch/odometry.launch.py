@@ -16,8 +16,8 @@ def generate_launch_description():
 
     args = [
         DeclareLaunchArgument('use_sim_time', default_value='true'),   # 'false' on the real rover
-        DeclareLaunchArgument('wheel_radius', default_value='0.036'),
-        DeclareLaunchArgument('wheel_separation', default_value='0.30'),  # calibrate!
+        DeclareLaunchArgument('wheel_radius', default_value='0.03706'),
+        DeclareLaunchArgument('wheel_separation', default_value='0.39598'),  # calibrate!
         DeclareLaunchArgument('publish_euler_debug', default_value='true'),
     ]
 

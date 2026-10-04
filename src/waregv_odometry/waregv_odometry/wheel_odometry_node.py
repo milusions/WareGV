@@ -34,7 +34,7 @@ class WheelOnlyOdom(Node):
         super().__init__('wheel_only_odom')
         P = self.declare_parameter
         P('wheel_radius', 0.03706)
-        P('wheel_separation', 0.72380)    
+        P('wheel_separation', 0.39598)    
         P('left_sign', 1.0)
         P('right_sign', 1.0)
         P('left_scale', 1.0)            # optional per-side fix if straight line curves
