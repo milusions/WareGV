@@ -1,151 +1,158 @@
 #!/usr/bin/env python3
 """
-BNO055 -> /imu_chassis
+BNO055 -> /imu_chassis : GYRO Z ONLY, built for reliability.
 
-Changes vs the original:
-  * Sets the operating mode explicitly. Default 'imu' (IMUPLUS, 6-axis, NO magnetometer).
-    The Adafruit library otherwise starts in NDOF (magnetometer on), which the motors corrupt.
-  * 50 Hz default (chip output is 100 Hz; avoids reading duplicate samples).
-  * Linear acceleration is optional (read_accel) to cut I2C traffic.
-  * Counts failed reads and logs them with the chip's calibration status every 10 s.
-  * When a field is not read, its covariance[0] = -1 (ROS convention for "not provided").
+  * Chip runs in GYRONLY mode: no fusion, no accel/mag, no calibration dependency.
+  * Each poll reads ONLY the 2 bytes of gyro Z (registers 0x18/0x19) in one transaction.
+  * Majority vote: `votes` back-to-back reads per tick, median is used. A single corrupt
+    read cannot get through; a tick with no agreement is dropped (not published).
+  * Range check (|z| <= 8 rad/s).
+  * Watchdog: mode register is checked every 0.5 s; two mismatches in a row (= chip reset
+    or bus corruption) -> mode re-applied, nothing published for 1 s.
+  * Timestamp = midpoint of the read.
+  * Same unit constant as the Adafruit library (900 LSB per rad/s), so the gyro_scale you
+    already calibrated stays valid.
 
-Parameters: mode ('imu'|'gyro'|'ndof'), rate_hz, read_quat, read_accel, frame_id
+Published: sensor_msgs/Imu on /imu_chassis. Only angular_velocity.z is meaningful;
+orientation and linear_acceleration covariance[0] = -1 (ROS "not provided").
+
+Parameters: rate_hz (50), votes (3), i2c_bus (1), address (0x28), frame_id, gyro_var
 """
+import struct
 import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
 from sensor_msgs.msg import Imu
 from adafruit_extended_bus import ExtendedI2C as I2C
 import adafruit_bno055
 
-MODES = {
-    'imu': adafruit_bno055.IMUPLUS_MODE,    # accel + gyro fusion, relative yaw, no magnetometer
-    'gyro': adafruit_bno055.GYRONLY_MODE,   # raw gyro only (no orientation)
-    'ndof': adafruit_bno055.NDOF_MODE,      # 9-axis (magnetometer) - avoid on a motorised robot
-}
+GYR_Z_LSB = 0x18
+LSB_PER_RAD_S = 900.0          # same constant the Adafruit library uses
+MODE = adafruit_bno055.GYRONLY_MODE
+MAX_RATE = 8.0                 # rad/s, physical sanity limit
+VOTE_AGREE = 0.05              # rad/s, 2-sample agreement tolerance
 
 
-class IMUChassis(Node):
+class GyroZRelay(Node):
     def __init__(self):
         super().__init__('imu_node')
-        self.declare_parameter('mode', 'imu')
         self.declare_parameter('rate_hz', 50.0)
-        self.declare_parameter('read_quat', True)
-        self.declare_parameter('read_accel', False)
+        self.declare_parameter('votes', 3)
+        self.declare_parameter('i2c_bus', 1)
+        self.declare_parameter('address', 0x28)
         self.declare_parameter('frame_id', 'imu_link')
+        self.declare_parameter('gyro_var', 1e-4)
         g = lambda n: self.get_parameter(n).value
 
-        mode = str(g('mode'))
-        if mode not in MODES:
-            raise ValueError(f'mode must be one of {list(MODES)}')
-        self.read_quat = bool(g('read_quat')) and mode != 'gyro'
-        self.read_accel = bool(g('read_accel')) and mode != 'gyro'
+        self.votes = max(1, int(g('votes')))
+        self.addr = int(g('address'))
         rate = float(g('rate_hz'))
 
-        self.pub = self.create_publisher(Imu, '/imu_chassis', 10)
-
-        self.i2c = I2C(1)
-        self.bno = adafruit_bno055.BNO055_I2C(self.i2c)
-        self.bno.mode = MODES[mode]
-        time.sleep(0.1)
+        self.i2c = I2C(int(g('i2c_bus')))
+        self._init_chip()
 
         self.msg = Imu()
         self.msg.header.frame_id = str(g('frame_id'))
-        cov = [0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01]
-        self.msg.angular_velocity_covariance = cov
-        self.msg.orientation_covariance = cov if self.read_quat else [-1.0] + [0.0] * 8
-        self.msg.linear_acceleration_covariance = cov if self.read_accel else [-1.0] + [0.0] * 8
+        self.msg.orientation_covariance = [-1.0] + [0.0] * 8
+        self.msg.linear_acceleration_covariance = [-1.0] + [0.0] * 8
+        self.msg.angular_velocity_covariance = [1e6, 0.0, 0.0, 0.0, 1e6, 0.0, 0.0, 0.0,
+                                                float(g('gyro_var'))]
 
-        self.n_ok = 0
-        self.n_bad = 0
-        self.n_reset = 0
-        self.bad_mode = 0
+        self.pub = self.create_publisher(Imu, '/imu_chassis', 10)
+        self.n_ok = self.n_bad = self.n_reset = self.bad_mode = 0
         self.quiet_until = 0.0
-        self.expected_mode = MODES[mode]
+        self.create_timer(1.0 / rate, self.tick)
         self.create_timer(0.5, self.watchdog)
-        self.create_timer(1.0 / rate, self.read_and_publish)
         self.create_timer(10.0, self.report)
-        self.get_logger().info(
-            f'IMU Chassis running: mode={mode}, {rate:.0f} Hz, '
-            f'quat={self.read_quat}, accel={self.read_accel}')
+        self.get_logger().info(f'Gyro-Z relay: GYRONLY, {rate:.0f} Hz, votes={self.votes}')
+
+    # ---------- chip ----------
+    def _init_chip(self):
+        for attempt in range(5):
+            try:
+                self.bno = adafruit_bno055.BNO055_I2C(self.i2c, address=self.addr)
+                self.bno.mode = MODE
+                time.sleep(0.1)
+                return
+            except Exception as e:
+                self.get_logger().warn(f'BNO055 init attempt {attempt + 1} failed: {e}')
+                time.sleep(0.5)
+        raise RuntimeError('BNO055 not responding')
+
+    def _read_z(self) -> float:
+        buf = bytearray(2)
+        with self.bno.i2c_device as dev:
+            dev.write_then_readinto(bytes([GYR_Z_LSB]), buf)
+        return struct.unpack('<h', bytes(buf))[0] / LSB_PER_RAD_S
+
+    # ---------- main loop ----------
+    def tick(self):
+        if time.monotonic() < self.quiet_until:
+            return
+        t0 = self.get_clock().now()
+        vals = []
+        for _ in range(self.votes):
+            try:
+                vals.append(self._read_z())
+            except Exception:
+                pass
+        t1 = self.get_clock().now()
+
+        need = 2 if self.votes >= 2 else 1
+        if len(vals) < need:
+            self.n_bad += 1
+            return
+        vals.sort()
+        z = vals[len(vals) // 2] if len(vals) % 2 else 0.5 * (vals[len(vals) // 2 - 1] + vals[len(vals) // 2])
+        if len(vals) == 2 and abs(vals[1] - vals[0]) > VOTE_AGREE:
+            self.n_bad += 1                    # two reads disagree, cannot tell which is right
+            return
+        if abs(z) > MAX_RATE:
+            self.n_bad += 1
+            return
+
+        self.msg.header.stamp = (t0 + Duration(nanoseconds=(t1 - t0).nanoseconds // 2)).to_msg()
+        self.msg.angular_velocity.z = z
+        self.pub.publish(self.msg)
+        self.n_ok += 1
 
     def watchdog(self):
-        """Detect a chip reset / corrupted mode: the mode register no longer matches."""
         try:
             m = self.bno.mode
         except Exception:
             return
-        if m == self.expected_mode:
+        if m == MODE:
             self.bad_mode = 0
             return
         self.bad_mode += 1
-        if self.bad_mode < 2:               # one mismatch may be a corrupt read; need two
+        if self.bad_mode < 2:
             return
         self.bad_mode = 0
         self.n_reset += 1
-        self.get_logger().error(
-            f'BNO055 mode register = {m:#04x}, expected {self.expected_mode:#04x}: '
-            f'chip reset or bus corruption (count={self.n_reset}). Re-applying mode.')
+        self.get_logger().error(f'BNO055 mode={m:#04x}, expected {MODE:#04x}: chip reset or bus '
+                                f'corruption (count={self.n_reset}). Re-applying mode.')
         try:
-            self.bno.mode = self.expected_mode
+            self.bno.mode = MODE
         except Exception as e:
-            self.get_logger().error(f'Could not re-apply mode: {e}')
-        self.quiet_until = time.monotonic() + 1.0   # publish nothing while it settles
+            self.get_logger().error(f'Re-apply failed ({e}); full re-init')
+            try:
+                self._init_chip()
+            except Exception as e2:
+                self.get_logger().error(f'Re-init failed: {e2}')
+        self.quiet_until = time.monotonic() + 1.0
 
     def report(self):
-        try:
-            cal = self.bno.calibration_status      # (sys, gyro, accel, mag), 3 = fully calibrated
-        except Exception:
-            cal = 'n/a'
-        self.get_logger().info(f'reads ok={self.n_ok} failed={self.n_bad} resets={self.n_reset}  calibration(sys,gyro,acc,mag)={cal}')
-
-    def read_and_publish(self):
-        if time.monotonic() < self.quiet_until:
-            return
-        try:
-            gyro = self.bno.gyro
-            quat = self.bno.quaternion if self.read_quat else None
-            accel = self.bno.linear_acceleration if self.read_accel else None
-
-            if gyro is None or any(v is None for v in gyro):
-                raise ValueError('gyro None')
-            if any(abs(v) > 8.0 for v in gyro):
-                raise ValueError(f'gyro out of range {gyro}')
-            if self.read_quat and (quat is None or any(v is None for v in quat)):
-                raise ValueError('quaternion None')
-            if self.read_quat and abs(sum(v * v for v in quat) - 1.0) > 0.1:
-                raise ValueError('bad quaternion norm (zeros after reset?)')
-            if self.read_accel and (accel is None or any(v is None for v in accel)):
-                raise ValueError('accel None')
-
-            self.msg.header.stamp = self.get_clock().now().to_msg()
-
-            self.msg.angular_velocity.x = float(gyro[0])
-            self.msg.angular_velocity.y = float(gyro[1])
-            self.msg.angular_velocity.z = float(gyro[2])
-
-            if self.read_quat:      # Adafruit WXYZ -> ROS XYZW
-                self.msg.orientation.x = float(quat[1])
-                self.msg.orientation.y = float(quat[2])
-                self.msg.orientation.z = float(quat[3])
-                self.msg.orientation.w = float(quat[0])
-            if self.read_accel:
-                self.msg.linear_acceleration.x = float(accel[0])
-                self.msg.linear_acceleration.y = float(accel[1])
-                self.msg.linear_acceleration.z = float(accel[2])
-
-            self.pub.publish(self.msg)
-            self.n_ok += 1
-        except Exception as e:
-            self.n_bad += 1
-            self.get_logger().warn(f'IMU read glitch: {e}', throttle_duration_sec=2.0)
+        total = self.n_ok + self.n_bad
+        self.get_logger().info(
+            f'published={self.n_ok} dropped={self.n_bad} '
+            f'({100.0 * self.n_bad / total if total else 0.0:.2f}%) resets={self.n_reset}')
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = IMUChassis()
+    node = GyroZRelay()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
