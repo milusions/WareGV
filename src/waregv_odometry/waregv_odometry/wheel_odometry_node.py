@@ -77,6 +77,8 @@ class WheelOdometryNode(Node):
         P('zupt_time', 0.5)
         P('zupt_rate', 0.03)
         P('imu_out_topic', '/imu/filtered')
+        P('odom_rate_hz', 30.0)           # max publish rate of /wheel/odom (0 = every joint msg)
+        P('publish_debug', False)         # /yaw_debug (costs CPU; turn on only when testing)
 
         g = lambda n: self.get_parameter(n).value
         self.r = float(g('wheel_radius'))
@@ -97,6 +99,11 @@ class WheelOdometryNode(Node):
         self.zupt_time = float(g('zupt_time'))
         self.zupt_rate = float(g('zupt_rate'))
         self.still_since = None
+        hz = float(g('odom_rate_hz'))
+        self.pub_period = 1.0 / hz if hz > 0.0 else 0.0
+        self.publish_debug = bool(g('publish_debug'))
+        self.acc_ds = self.acc_dth = self.acc_dt = 0.0
+        self.last_pub_t = None
         self.source = str(g('yaw_source'))
         if self.source not in ('wheel', 'gyro', 'orientation'):
             raise ValueError("yaw_source must be 'wheel', 'gyro' or 'orientation'")
@@ -129,6 +136,8 @@ class WheelOdometryNode(Node):
         self.bias_sum = 0.0
         self.bias_n = 0
         self.bias_t0 = None
+        self.n_imu = 0
+        self.n_joint = 0
 
         self.pub = self.create_publisher(Odometry, odom_topic, 20)
         self.imu_pub = self.create_publisher(Imu, str(g('imu_out_topic')), qos_profile_sensor_data)
@@ -138,6 +147,7 @@ class WheelOdometryNode(Node):
         self.create_subscription(Imu, str(g('imu_topic')), self.imu_cb, qos_profile_sensor_data)
         if self.log_yaw:
             self.create_timer(2.0, self._log)
+        self.create_timer(3.0, self._wait_diag)
 
         self.get_logger().info(
             f'wheel_only_odom: r={self.r} sep={self.sep} yaw_source={self.source} '
@@ -158,8 +168,20 @@ class WheelOdometryNode(Node):
             f'orient={d(self.yaw_orient):8.2f}  bias={self.bias:+.5f}  '
             f'[using {self.source}]')
 
+    def _wait_diag(self):
+        """Explain why /imu/filtered is not being published yet."""
+        if self.bias_done:
+            return
+        still = abs(self.wheel_lin) < 0.01 and abs(self.wheel_ang) < 0.02
+        self.get_logger().warn(
+            f'Waiting for gyro bias: imu msgs={self.n_imu}, joint msgs={self.n_joint}, '
+            f'wheels still={still}, samples={self.bias_n}. '
+            f'(0 imu msgs = IMU topic {self.get_parameter("imu_topic").value} not arriving; '
+            f'still=False = wheels moving/noisy)')
+
     # ---------- IMU ----------
     def imu_cb(self, msg: Imu):
+        self.n_imu += 1
         t = self._stamp(msg.header.stamp)
         dt = None if self.last_imu_t is None else t - self.last_imu_t
         self.last_imu_t = t
@@ -235,6 +257,7 @@ class WheelOdometryNode(Node):
 
     # ---------- wheels ----------
     def joint_cb(self, msg: JointState):
+        self.n_joint += 1
         t = self._stamp(msg.header.stamp)
         dt = None if self.last_t is None else t - self.last_t
         self.last_t = t
@@ -267,8 +290,8 @@ class WheelOdometryNode(Node):
         self.wheel_lin, self.wheel_ang = ds / dt, dth_wheel / dt
 
         # ---- choose heading increment ----
-        if self.source == 'wheel':
-            dth = dth_wheel
+        if self.source == 'wheel' or self.ekf_mode:
+            dth = dth_wheel                     # EKF uses only the twist; never wait for the IMU
         else:
             if self.source == 'gyro':
                 if not self.bias_done:
@@ -294,6 +317,18 @@ class WheelOdometryNode(Node):
         self.y += chord * math.sin(self.th + dth / 2.0)
         self.th = wrap_pi(self.th + dth)
 
+        # average the twist over the publish interval, publish at <= odom_rate_hz
+        self.acc_ds += ds
+        self.acc_dth += dth_wheel
+        self.acc_dt += dt
+        if (self.pub_period > 0.0 and self.last_pub_t is not None and
+                t - self.last_pub_t < self.pub_period):
+            return
+        self.last_pub_t = t
+        v_lin = self.acc_ds / self.acc_dt
+        w_z = self.acc_dth / self.acc_dt
+        self.acc_ds = self.acc_dth = self.acc_dt = 0.0
+
         qz, qw = math.sin(self.th / 2.0), math.cos(self.th / 2.0)
         stamp = msg.header.stamp if msg.header.stamp.sec else self.get_clock().now().to_msg()
 
@@ -305,8 +340,8 @@ class WheelOdometryNode(Node):
         o.pose.pose.position.y = self.y
         o.pose.pose.orientation.z = qz
         o.pose.pose.orientation.w = qw
-        o.twist.twist.linear.x = ds / dt
-        o.twist.twist.angular.z = dth_wheel / dt   # always wheel-derived (independent of the gyro)
+        o.twist.twist.linear.x = v_lin
+        o.twist.twist.angular.z = w_z   # always wheel-derived (independent of the gyro)
         for i, v in ((0, 1e-3), (7, 1e-3), (35, 1e-2)):
             o.pose.covariance[i] = v
         o.twist.covariance[0] = self.vx_var
@@ -323,10 +358,11 @@ class WheelOdometryNode(Node):
             tf.transform.rotation.w = qw
             self.tfb.sendTransform(tf)
 
-        v = Vector3()
-        v.x, v.y, v.z = (math.degrees(self.yaw_wheel), math.degrees(self.yaw_gyro),
-                         math.degrees(self.yaw_orient))
-        self.dbg.publish(v)
+        if self.publish_debug:
+            v = Vector3()
+            v.x, v.y, v.z = (math.degrees(self.yaw_wheel), math.degrees(self.yaw_gyro),
+                             math.degrees(self.yaw_orient))
+            self.dbg.publish(v)
 
 
 def main():
