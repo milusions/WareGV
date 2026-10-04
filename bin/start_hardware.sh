@@ -20,7 +20,7 @@ while ! ip link show up | grep -q "lo"; do
 done
 
 MAX_LINEAR_VELOCITY="0.30"
-MAX_ANGULAR_VELOCITY="0.21"
+MAX_ANGULAR_VELOCITY="0.15"
 WHEEL_RADIUS="0.03706"
 track_width="0.39598"
 MAP_NAME="small_warehouse"

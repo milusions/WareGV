@@ -60,20 +60,50 @@ class IMUChassis(Node):
 
         self.n_ok = 0
         self.n_bad = 0
+        self.n_reset = 0
+        self.bad_mode = 0
+        self.quiet_until = 0.0
+        self.expected_mode = MODES[mode]
+        self.create_timer(0.5, self.watchdog)
         self.create_timer(1.0 / rate, self.read_and_publish)
         self.create_timer(10.0, self.report)
         self.get_logger().info(
             f'IMU Chassis running: mode={mode}, {rate:.0f} Hz, '
             f'quat={self.read_quat}, accel={self.read_accel}')
 
+    def watchdog(self):
+        """Detect a chip reset / corrupted mode: the mode register no longer matches."""
+        try:
+            m = self.bno.mode
+        except Exception:
+            return
+        if m == self.expected_mode:
+            self.bad_mode = 0
+            return
+        self.bad_mode += 1
+        if self.bad_mode < 2:               # one mismatch may be a corrupt read; need two
+            return
+        self.bad_mode = 0
+        self.n_reset += 1
+        self.get_logger().error(
+            f'BNO055 mode register = {m:#04x}, expected {self.expected_mode:#04x}: '
+            f'chip reset or bus corruption (count={self.n_reset}). Re-applying mode.')
+        try:
+            self.bno.mode = self.expected_mode
+        except Exception as e:
+            self.get_logger().error(f'Could not re-apply mode: {e}')
+        self.quiet_until = time.monotonic() + 1.0   # publish nothing while it settles
+
     def report(self):
         try:
             cal = self.bno.calibration_status      # (sys, gyro, accel, mag), 3 = fully calibrated
         except Exception:
             cal = 'n/a'
-        self.get_logger().info(f'reads ok={self.n_ok} failed={self.n_bad}  calibration(sys,gyro,acc,mag)={cal}')
+        self.get_logger().info(f'reads ok={self.n_ok} failed={self.n_bad} resets={self.n_reset}  calibration(sys,gyro,acc,mag)={cal}')
 
     def read_and_publish(self):
+        if time.monotonic() < self.quiet_until:
+            return
         try:
             gyro = self.bno.gyro
             quat = self.bno.quaternion if self.read_quat else None
@@ -81,8 +111,12 @@ class IMUChassis(Node):
 
             if gyro is None or any(v is None for v in gyro):
                 raise ValueError('gyro None')
+            if any(abs(v) > 8.0 for v in gyro):
+                raise ValueError(f'gyro out of range {gyro}')
             if self.read_quat and (quat is None or any(v is None for v in quat)):
                 raise ValueError('quaternion None')
+            if self.read_quat and abs(sum(v * v for v in quat) - 1.0) > 0.1:
+                raise ValueError('bad quaternion norm (zeros after reset?)')
             if self.read_accel and (accel is None or any(v is None for v in accel)):
                 raise ValueError('accel None')
 

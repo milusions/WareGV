@@ -54,7 +54,7 @@ def generate_launch_description():
         name="max_linear_velocity", default_value="0.30"
     )
     max_angular_velocity_arg = DeclareLaunchArgument(
-        name="max_angular_velocity", default_value=str(0.21)
+        name="max_angular_velocity", default_value=str(0.15)
     )
     wheel_radius_arg = DeclareLaunchArgument(
         name="wheel_radius", default_value="0.03706"
