@@ -55,7 +55,7 @@ class Tracker(Node):
             self.send(0, 0)
             time.sleep(0.05)
 
-
+s
 def clip(v, lo, hi):
     return max(lo, min(hi, v))
 
@@ -67,7 +67,7 @@ def main():
     ap.add_argument('--target', type=float, default=0.6, help='m (straight) or deg (turn)')
     ap.add_argument('--current', type=float, default=None, help='current radius or separation')
     ap.add_argument('--vmax', type=float, default=0.10)
-    ap.add_argument('--wmax', type=float, default=0.8)
+    ap.add_argument('--wmax', type=float, default=0.2)
     ap.add_argument('--odom', default='/odom')
     ap.add_argument('--cmd', default='/cmd_vel')
     a = ap.parse_args()
@@ -125,3 +125,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    

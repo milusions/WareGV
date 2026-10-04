@@ -21,8 +21,8 @@ done
 
 MAX_LINEAR_VELOCITY="0.30"
 MAX_ANGULAR_VELOCITY="0.21"
-WHEEL_RADIUS="0.036"
-track_width="0.2"
+WHEEL_RADIUS="0.03706"
+track_width="0.66988"
 MAP_NAME="small_warehouse"
 
 while [[ $# -gt 0 ]]; do

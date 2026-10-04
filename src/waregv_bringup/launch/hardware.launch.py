@@ -57,10 +57,10 @@ def generate_launch_description():
         name="max_angular_velocity", default_value=str(0.21)
     )
     wheel_radius_arg = DeclareLaunchArgument(
-        name="wheel_radius", default_value="0.036"
+        name="wheel_radius", default_value="0.03706"
     )
     track_width_arg = DeclareLaunchArgument(
-        name="track_width", default_value="0.2"
+        name="track_width", default_value="0.66988"
     )
     map_name_arg = DeclareLaunchArgument(name="map_name", default_value="map")
 
