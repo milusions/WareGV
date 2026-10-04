@@ -1,6 +1,6 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 5.0             # lowered from 30.0: gives the filter time to keep up
+    frequency: 30.0
     sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
@@ -15,24 +15,43 @@ ekf_filter_node:
 
     # Config order: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
 
-    # Wheel inverse-kinematics twist: forward speed + yaw rate
+    # Wheel twist (from wheel_odometry_node, ekf_mode:=true): forward speed + yaw rate.
+    # Its yaw-rate covariance is large (1e-2), so the gyro dominates heading.
     odom0: /wheel/odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  false, false,
                    false, false, true,
                    false, false, false]
-    odom0_queue_size: 5
+    odom0_queue_size: 10
     odom0_differential: false
+    odom0_relative: false
 
-    # Gyro: yaw rate only (already averaged to ~50 Hz by wheel_odometry)
+    # Gyro yaw rate (bias-removed, scaled, zero while parked). Small covariance (4e-5).
     imu0: /imu/filtered
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
                   false, false, true,
                   false, false, false]
-    imu0_queue_size: 5
+    imu0_queue_size: 20
     imu0_differential: false
+    imu0_relative: false
     imu0_remove_gravitational_acceleration: false
-    imu0_twist_rejection_threshold: 6.0
+
+    # Lower vyaw / yaw noise => smoother, trusts the model more. Raise if heading lags real turns.
+    process_noise_covariance: [0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.03, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.025, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.015]

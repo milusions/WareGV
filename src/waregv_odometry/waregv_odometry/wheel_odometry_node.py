@@ -63,11 +63,20 @@ class WheelOdometryNode(Node):
         P('yaw_source', 'gyro')          # 'wheel' | 'gyro' | 'orientation'
         P('imu_topic', '/imu_chassis')
         P('gyro_sign', 1.0)               # -1 if IMU z points down
-        P('gyro_scale', 0.97656)              # true_angle / measured_angle (calibrate with 360 test)
+        P('gyro_scale', 0.97656)             # true_angle / measured_angle (calibrate with 360 test)
         P('gyro_bias_z', 0.0)             # used only if startup_bias_time <= 0
         P('startup_bias_time', 3.0)       # s of standstill to measure bias; 0 = use gyro_bias_z
         P('imu_timeout', 0.5)             # s without IMU data -> warn and hold heading
         P('log_yaw', True)
+        # --- EKF feeding ---
+        P('ekf_mode', True)              # True: /wheel/odom + /imu/filtered, NO tf (EKF owns odom->base)
+        P('wheel_vx_var', 3e-4)           # (m/s)^2   covariance given to the EKF
+        P('wheel_wz_var', 1e-2)           # (rad/s)^2 large = EKF barely listens to wheel yaw rate
+        P('imu_var', 4e-5)                # (rad/s)^2 small = EKF trusts the gyro
+        P('zupt', True)                   # yaw rate sent to EKF = 0 while parked
+        P('zupt_time', 0.5)
+        P('zupt_rate', 0.03)
+        P('imu_out_topic', '/imu/filtered')
 
         g = lambda n: self.get_parameter(n).value
         self.r = float(g('wheel_radius'))
@@ -78,7 +87,16 @@ class WheelOdometryNode(Node):
         self.max_dt = float(g('max_dt'))
         self.odom_frame = str(g('odom_frame'))
         self.base_frame = str(g('base_frame'))
-        self.publish_tf = bool(g('publish_tf'))
+        self.ekf_mode = bool(g('ekf_mode'))
+        self.publish_tf = bool(g('publish_tf')) and not self.ekf_mode
+        odom_topic = '/wheel/odom' if self.ekf_mode else str(g('odom_topic'))
+        self.vx_var = float(g('wheel_vx_var'))
+        self.wz_var = float(g('wheel_wz_var'))
+        self.imu_var = float(g('imu_var'))
+        self.zupt = bool(g('zupt'))
+        self.zupt_time = float(g('zupt_time'))
+        self.zupt_rate = float(g('zupt_rate'))
+        self.still_since = None
         self.source = str(g('yaw_source'))
         if self.source not in ('wheel', 'gyro', 'orientation'):
             raise ValueError("yaw_source must be 'wheel', 'gyro' or 'orientation'")
@@ -112,7 +130,8 @@ class WheelOdometryNode(Node):
         self.bias_n = 0
         self.bias_t0 = None
 
-        self.pub = self.create_publisher(Odometry, str(g('odom_topic')), 20)
+        self.pub = self.create_publisher(Odometry, odom_topic, 20)
+        self.imu_pub = self.create_publisher(Imu, str(g('imu_out_topic')), qos_profile_sensor_data)
         self.dbg = self.create_publisher(Vector3, '/yaw_debug', 10)
         self.tfb = TransformBroadcaster(self)
         self.create_subscription(JointState, str(g('joint_topic')), self.joint_cb, 20)
@@ -122,7 +141,7 @@ class WheelOdometryNode(Node):
 
         self.get_logger().info(
             f'wheel_only_odom: r={self.r} sep={self.sep} yaw_source={self.source} '
-            f'gyro_scale={self.gscale} gyro_sign={self.gsign} '
+            f'gyro_scale={self.gscale} gyro_sign={self.gsign} ekf_mode={self.ekf_mode} '
             f'mode={"position" if self.use_pos else "velocity"}')
         if self.source == 'gyro' and not self.bias_done:
             self.get_logger().info(f'Keep the robot STILL for {self.bias_time:.0f}s (measuring gyro bias)')
@@ -170,9 +189,15 @@ class WheelOdometryNode(Node):
         if not math.isfinite(raw):
             return
 
+        still = abs(self.wheel_lin) < 0.01 and abs(self.wheel_ang) < 0.02
+        if still:
+            if self.still_since is None:
+                self.still_since = t
+        else:
+            self.still_since = None
+
         # startup bias measurement (robot must be still)
         if not self.bias_done:
-            still = abs(self.wheel_lin) < 0.01 and abs(self.wheel_ang) < 0.02
             if not still:
                 self.bias_sum, self.bias_n, self.bias_t0 = 0.0, 0, None
                 return
@@ -191,6 +216,22 @@ class WheelOdometryNode(Node):
         if dt_ok:
             self.yaw_gyro += 0.5 * (self.prev_rate + rate) * dt
         self.prev_rate = rate
+
+        if self.ekf_mode:
+            out_rate = rate
+            if (self.zupt and self.still_since is not None and
+                    t - self.still_since >= self.zupt_time and abs(rate) < self.zupt_rate):
+                out_rate = 0.0
+            out = Imu()
+            out.header.stamp = msg.header.stamp
+            out.header.frame_id = self.base_frame     # yaw rate only; z axis already sign-corrected
+            out.orientation_covariance[0] = -1.0
+            out.angular_velocity.z = out_rate
+            out.angular_velocity_covariance[0] = 1e6
+            out.angular_velocity_covariance[4] = 1e6
+            out.angular_velocity_covariance[8] = self.imu_var
+            out.linear_acceleration_covariance[0] = -1.0
+            self.imu_pub.publish(out)
 
     # ---------- wheels ----------
     def joint_cb(self, msg: JointState):
@@ -265,11 +306,11 @@ class WheelOdometryNode(Node):
         o.pose.pose.orientation.z = qz
         o.pose.pose.orientation.w = qw
         o.twist.twist.linear.x = ds / dt
-        o.twist.twist.angular.z = dth / dt
+        o.twist.twist.angular.z = dth_wheel / dt   # always wheel-derived (independent of the gyro)
         for i, v in ((0, 1e-3), (7, 1e-3), (35, 1e-2)):
             o.pose.covariance[i] = v
-        for i, v in ((0, 1e-3), (35, 1e-2)):
-            o.twist.covariance[i] = v
+        o.twist.covariance[0] = self.vx_var
+        o.twist.covariance[35] = self.wz_var
         self.pub.publish(o)
 
         if self.publish_tf:
