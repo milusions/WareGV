@@ -24,8 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'wheel_odometry_node = waregv_odometry.wheel_odometry_node:main',
-            "odom_imu_calibrator = waregv_odometry.odom_imu_calibrator:main",
+            'wheel_odometry_node = waregv_odometry.wheel_odometry_node:main'
           
       
         ],
