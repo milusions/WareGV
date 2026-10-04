@@ -41,21 +41,16 @@ _DEFAULT_LIMITS = {
 }
 _DEFAULT_FILTER_WINDOW = 5
 
-# Defaults for the inertia/braking compensation pulse (see _update_brake_pulse).
 _DEFAULT_BRAKE = {
     "enabled": True,
-    "trigger_rate_threshold": 15.0,   # rad/s^2 -- how fast the *target* must be changing to count as "sudden"
-    "min_velocity_to_trigger": 1.0,   # rad/s -- don't bother braking if we were barely moving anyway
-    "gain": 0.3,                      # fraction of the pre-change velocity used as the counter-pulse magnitude
-    "duration": 0.15,                 # seconds the pulse lasts, linearly decaying to zero
+    "trigger_rate_threshold": 15.0,
+    "min_velocity_to_trigger": 1.0,
+    "gain": 0.3,
+    "duration": 0.15,
 }
 
-# Defaults for the Bezier (smoothstep) accel/decel profile. `duration` is the
-# main responsiveness knob: shorter = feels faster/snappier, longer = feels
-# more sluggish. Unlike a hard step, a Bezier ramp still starts and ends with
-# zero slope, so even a short duration doesn't feel like a jolt.
 _DEFAULT_BEZIER = {
-    "duration": 0.25,   # seconds to go from any velocity to a new target
+    "duration": 0.25,
 }
 
 
@@ -66,11 +61,9 @@ class _AxisState:
         self.buffer = deque(maxlen=window)
         self.current_velocity = 0.0
         self.current_acceleration = 0.0
-        # Inertia-compensation ("brake pulse") state.
         self.prev_target = 0.0
         self.brake_time_left = 0.0
         self.brake_magnitude = 0.0
-        # Bezier accel/decel profile state.
         self.bezier_start_velocity = 0.0
         self.bezier_target = 0.0
         self.bezier_elapsed = 0.0
@@ -100,11 +93,16 @@ def _load_config(config_path):
     }
 
 
+def _safe_configure(servo):
+    """Trap startup configuration errors so the node survives."""
+    try:
+        if servo is not None:
+            configure_servo(servo)
+    except Exception:
+        pass
+
+
 def init(left_port, right_port, forward_motor, rear_motor, config_path):
-    """
-    :param config_path: full path to motor_system_config.yaml
-                         (e.g. <package_share_dir>/config/motor_system_config.yaml)
-    """
     global FRONT_LEFT_MOTOR_HANDLE, FRONT_RIGHT_MOTOR_HANDLE
     global REAR_LEFT_MOTOR_HANDLE, REAR_RIGHT_MOTOR_HANDLE
     global LEFT_CONTROLLER, RIGHT_CONTROLLER
@@ -114,8 +112,6 @@ def init(left_port, right_port, forward_motor, rear_motor, config_path):
     window = _CONFIG["filter"]["moving_average_window"]
     _AXIS_STATES = [_AxisState(window) for _ in range(4)]
 
-    # "w" truncates the file, so each bootup starts a fresh log instead of
-    # appending indefinitely across runs.
     os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
     _LOG_FILE = open(_LOG_PATH, "w")
     _LOG_FILE.write(
@@ -127,20 +123,28 @@ def init(left_port, right_port, forward_motor, rear_motor, config_path):
     )
     _LOG_FILE.flush()
 
-    LEFT_CONTROLLER = ST3215("/dev/tty" + left_port)
-    RIGHT_CONTROLLER = ST3215("/dev/tty" + right_port)
+    try:
+        LEFT_CONTROLLER = ST3215("/dev/tty" + left_port)
+    except Exception:
+        LEFT_CONTROLLER = None
+        
+    try:
+        RIGHT_CONTROLLER = ST3215("/dev/tty" + right_port)
+    except Exception:
+        RIGHT_CONTROLLER = None
 
-    FRONT_LEFT_MOTOR_HANDLE = LEFT_CONTROLLER.wrap_servo(forward_motor)
-    REAR_LEFT_MOTOR_HANDLE = LEFT_CONTROLLER.wrap_servo(rear_motor)
+    if LEFT_CONTROLLER:
+        FRONT_LEFT_MOTOR_HANDLE = LEFT_CONTROLLER.wrap_servo(forward_motor)
+        REAR_LEFT_MOTOR_HANDLE = LEFT_CONTROLLER.wrap_servo(rear_motor)
 
-    FRONT_RIGHT_MOTOR_HANDLE = RIGHT_CONTROLLER.wrap_servo(forward_motor)
-    REAR_RIGHT_MOTOR_HANDLE = RIGHT_CONTROLLER.wrap_servo(rear_motor)
+    if RIGHT_CONTROLLER:
+        FRONT_RIGHT_MOTOR_HANDLE = RIGHT_CONTROLLER.wrap_servo(forward_motor)
+        REAR_RIGHT_MOTOR_HANDLE = RIGHT_CONTROLLER.wrap_servo(rear_motor)
 
-    # One-time mode/torque setup -- never repeated on every control cycle.
-    configure_servo(FRONT_LEFT_MOTOR_HANDLE)
-    configure_servo(FRONT_RIGHT_MOTOR_HANDLE)
-    configure_servo(REAR_LEFT_MOTOR_HANDLE)
-    configure_servo(REAR_RIGHT_MOTOR_HANDLE)
+    _safe_configure(FRONT_LEFT_MOTOR_HANDLE)
+    _safe_configure(FRONT_RIGHT_MOTOR_HANDLE)
+    _safe_configure(REAR_LEFT_MOTOR_HANDLE)
+    _safe_configure(REAR_RIGHT_MOTOR_HANDLE)
 
 
 def _clamp(value, lo, hi):
@@ -148,24 +152,11 @@ def _clamp(value, lo, hi):
 
 
 def _smoothstep(t):
-    """Cubic Bezier-style ease: zero slope at both t=0 and t=1, so the ramp
-    starts and ends smoothly with no sharp acceleration kick at either end."""
     t = _clamp(t, 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
 
 
 def _apply_bezier_profile(state, target_velocity, dt, limits, bezier_cfg):
-    """
-    Smooth Bezier-curve ramp from wherever the wheel currently is to a new
-    target, replacing the old fixed accel/jerk trapezoid. Whenever the
-    target changes, a fresh ramp is started from the *actual current
-    velocity* (not from the old target), so a new command always gets an
-    immediate, smooth transition -- no waiting for the previous ramp to
-    finish first. `duration` (bezier_profile.duration in the config) is the
-    single knob that trades off responsiveness vs smoothness: a short
-    duration reacts almost immediately (fast) while still easing in/out
-    (not jerky); a long duration feels sluggish.
-    """
     if dt <= 0.0:
         return state.current_velocity
 
@@ -189,35 +180,6 @@ def _apply_bezier_profile(state, target_velocity, dt, limits, bezier_cfg):
 
 
 def _update_brake_pulse(state, target, dt, brake_cfg):
-    """
-    PX4-style inertia compensation.
-
-    When the *commanded target* changes abruptly -- e.g. full throttle to
-    zero -- the wheel still has momentum and will coast forward for a bit
-    even as spin_servo tells it to stop. A flight controller handles the
-    equivalent situation (stick snapped back to center) by briefly
-    commanding a touch of reverse thrust to cancel that momentum instead of
-    just cutting power and waiting for drag to do it. This does the same
-    thing in velocity space:
-
-      1. Detect a sudden change in the *target* (its rate of change exceeds
-         trigger_rate_threshold), while the wheel is still actually moving
-         and the new target represents a real deceleration/reversal
-         relative to current velocity.
-      2. On that edge, arm a short counter-pulse: a velocity offset opposite
-         in sign to the current velocity, sized as a fraction (gain) of how
-         fast we were going.
-      3. That offset is added on top of the normal jerk-limited profile
-         output and linearly decays to zero over `duration` seconds, so it
-         nudges the wheel to actively cancel momentum rather than coast,
-         then gets out of the way and lets the ordinary ramp finish the job.
-
-    This only ever *adds* a temporary correction on top of the existing
-    motion profile -- it never replaces or bypasses the accel/jerk limits,
-    so it can't reintroduce the original torque-toggling jitter.
-
-    :return: a velocity offset (rad/s) to add to this tick's profile output.
-    """
     if dt <= 0.0:
         return 0.0
 
@@ -228,8 +190,6 @@ def _update_brake_pulse(state, target, dt, brake_cfg):
     if brake_cfg.get("enabled", True) and state.brake_time_left <= 0.0 and changed_this_tick:
         sudden_change = abs(target_rate) > brake_cfg["trigger_rate_threshold"]
         already_moving = abs(state.current_velocity) > brake_cfg["min_velocity_to_trigger"]
-        # A real deceleration/reversal: the target now opposes current
-        # velocity, or is at least much smaller in magnitude than it.
         decelerating = (target * state.current_velocity < 0.0) or (
             abs(target) < 0.5 * abs(state.current_velocity)
         )
@@ -254,18 +214,16 @@ def _moving_average(state, value):
     return sum(state.buffer) / len(state.buffer)
 
 
-def control_motors(speed_list, dt):
-    """
-    Smooth, filtered motor control.
+def _safe_spin(servo, rad_per_sec):
+    """Bulletproof motor spin command. Ignores transient serial drops."""
+    try:
+        if servo is not None:
+            spin_servo(servo, rad_per_sec)
+    except Exception:
+        pass
 
-    :param speed_list: target speeds [front_left, front_right, rear_left, rear_right]
-                        in rad/s, BEFORE the left/right correction matrix.
-    :param dt: time in seconds since this was last called. Must reflect the
-               actual control-loop period (not the raw topic publish period),
-               since it drives the acceleration/jerk integration.
-    :return: the actual smoothed, filtered, rounded speeds that were sent to
-             the servos, in the same [fl, fr, rl, rr] order.
-    """
+
+def control_motors(speed_list, dt):
     if len(speed_list) != 4:
         raise ValueError("Speed list must contain exactly 4 values.")
     if _CONFIG is None or _AXIS_STATES is None:
@@ -285,98 +243,88 @@ def control_motors(speed_list, dt):
         filtered = _moving_average(state, combined)
         output_speeds.append(round(filtered, 2))
 
-    spin_servo(FRONT_LEFT_MOTOR_HANDLE, output_speeds[0])
-    spin_servo(FRONT_RIGHT_MOTOR_HANDLE, output_speeds[1])
-    spin_servo(REAR_LEFT_MOTOR_HANDLE, output_speeds[2])
-    spin_servo(REAR_RIGHT_MOTOR_HANDLE, output_speeds[3])
+    _safe_spin(FRONT_LEFT_MOTOR_HANDLE, output_speeds[0])
+    _safe_spin(FRONT_RIGHT_MOTOR_HANDLE, output_speeds[1])
+    _safe_spin(REAR_LEFT_MOTOR_HANDLE, output_speeds[2])
+    _safe_spin(REAR_RIGHT_MOTOR_HANDLE, output_speeds[3])
 
     if _LOG_FILE is not None:
-        torques = get_torques()  # raw 0.1%-of-rated-duty units from read_current_load()
+        torques = get_torques()
         ts = f"{time.time():.3f}"
         row = [ts]
         for sp, act, torque in zip(adjusted_speeds, output_speeds, torques):
             row.append(f"{sp:.2f}")
             row.append(f"{act}")
             row.append("NA" if torque is None else f"{torque}")
-        _LOG_FILE.write(",".join(row) + "\n")
-        _LOG_FILE.flush()
+        try:
+            _LOG_FILE.write(",".join(row) + "\n")
+            _LOG_FILE.flush()
+        except Exception:
+            pass
 
     return output_speeds
 
 
-def get_positions():
-    """
-    Read current position of each motor.
+def _safe_read(servo, read_method_name, fallback=0):
+    """Bulletproof hardware read. Returns fallback if hardware faults."""
+    try:
+        if servo is not None:
+            method = getattr(servo.sram, read_method_name)
+            return method()
+    except Exception:
+        pass
+    return fallback
 
-    :return: [front_left, front_right, rear_left, rear_right]
-    """
+
+def get_positions():
     return [
-        FRONT_LEFT_MOTOR_HANDLE.sram.read_current_location(),
-        FRONT_RIGHT_MOTOR_HANDLE.sram.read_current_location(),
-        REAR_LEFT_MOTOR_HANDLE.sram.read_current_location(),
-        REAR_RIGHT_MOTOR_HANDLE.sram.read_current_location(),
+        _safe_read(FRONT_LEFT_MOTOR_HANDLE, 'read_current_location', 0),
+        _safe_read(FRONT_RIGHT_MOTOR_HANDLE, 'read_current_location', 0),
+        _safe_read(REAR_LEFT_MOTOR_HANDLE, 'read_current_location', 0),
+        _safe_read(REAR_RIGHT_MOTOR_HANDLE, 'read_current_location', 0),
     ]
 
 
 def get_velocities():
-    """
-    Read current speed of each motor.
-
-    :return: [front_left, front_right, rear_left, rear_right]
-    """
     return [
-        FRONT_LEFT_MOTOR_HANDLE.sram.read_current_speed(),
-        FRONT_RIGHT_MOTOR_HANDLE.sram.read_current_speed(),
-        REAR_LEFT_MOTOR_HANDLE.sram.read_current_speed(),
-        REAR_RIGHT_MOTOR_HANDLE.sram.read_current_speed(),
+        _safe_read(FRONT_LEFT_MOTOR_HANDLE, 'read_current_speed', 0),
+        _safe_read(FRONT_RIGHT_MOTOR_HANDLE, 'read_current_speed', 0),
+        _safe_read(REAR_LEFT_MOTOR_HANDLE, 'read_current_speed', 0),
+        _safe_read(REAR_RIGHT_MOTOR_HANDLE, 'read_current_speed', 0),
     ]
 
 
 def get_velocities_rad():
-    """
-    Read current speed of each motor, converted to rad/s
-    (matching the sign convention used by spin_servo).
-
-    :return: [front_left, front_right, rear_left, rear_right]
-    """
     steps_per_sec = get_velocities()
     return [-1 * s * (2 * math.pi) / 4096 for s in steps_per_sec]
 
 
 def get_torques():
-    """
-    Read motor drive duty cycle ("current load") from each servo.
-
-    Confirmed against the python_st3215 source (registers.py,
-    read_current_load -> register 0x3C, "Current load", SRAM, read-only,
-    units 0.1% -- see MEMORY_TABLE.md and examples/13_load_sensing.py in
-    https://github.com/alessiodam/python-st3215). This isn't literally
-    torque in N*m; it's the motor's output drive duty cycle (0-1000 = 0-100%
-    of rated duty), which is what that library exposes and what its own
-    example script uses for load/blockage sensing -- close enough to
-    "torque received" for diagnosing an underpowered/blocked wheel.
-
-    :return: [front_left, front_right, rear_left, rear_right], each either
-             an int in 0.1% units (e.g. 500 = 50.0%) or None if the read
-             failed for that servo.
-    """
     return [
-        FRONT_LEFT_MOTOR_HANDLE.sram.read_current_load(),
-        FRONT_RIGHT_MOTOR_HANDLE.sram.read_current_load(),
-        REAR_LEFT_MOTOR_HANDLE.sram.read_current_load(),
-        REAR_RIGHT_MOTOR_HANDLE.sram.read_current_load(),
+        _safe_read(FRONT_LEFT_MOTOR_HANDLE, 'read_current_load', None),
+        _safe_read(FRONT_RIGHT_MOTOR_HANDLE, 'read_current_load', None),
+        _safe_read(REAR_LEFT_MOTOR_HANDLE, 'read_current_load', None),
+        _safe_read(REAR_RIGHT_MOTOR_HANDLE, 'read_current_load', None),
     ]
 
 
 def shutdown():
-    """
-    Close both serial connections and the velocity log file. Call this when done.
-    """
+    """Failsafe motor stop and cleanly close serial connections."""
     global _LOG_FILE
-    if LEFT_CONTROLLER is not None:
-        LEFT_CONTROLLER.close()
-    if RIGHT_CONTROLLER is not None:
-        RIGHT_CONTROLLER.close()
-    if _LOG_FILE is not None:
-        _LOG_FILE.close()
-        _LOG_FILE = None
+    
+    # Active braking failsafe on teardown
+    _safe_spin(FRONT_LEFT_MOTOR_HANDLE, 0.0)
+    _safe_spin(FRONT_RIGHT_MOTOR_HANDLE, 0.0)
+    _safe_spin(REAR_LEFT_MOTOR_HANDLE, 0.0)
+    _safe_spin(REAR_RIGHT_MOTOR_HANDLE, 0.0)
+
+    try:
+        if LEFT_CONTROLLER is not None:
+            LEFT_CONTROLLER.close()
+        if RIGHT_CONTROLLER is not None:
+            RIGHT_CONTROLLER.close()
+        if _LOG_FILE is not None:
+            _LOG_FILE.close()
+            _LOG_FILE = None
+    except Exception:
+        pass

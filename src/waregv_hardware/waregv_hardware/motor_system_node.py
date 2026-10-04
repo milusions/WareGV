@@ -49,6 +49,11 @@ class MotorSystemNode(Node):
         self.control_period = 1.0 / rate_hz
         self.last_control_time = time.monotonic()
         
+        # Deadman switch tracker
+        self.last_command_time = time.monotonic()
+        self.deadman_timeout = 1.0
+        self.deadman_active = False
+        
         self.control_timer = self.create_timer(self.control_period, self.control_loop)
         self.joint_timer = self.create_timer(0.1, self.publish_joint_states)
 
@@ -62,6 +67,11 @@ class MotorSystemNode(Node):
             self.get_logger().error(f"Expected 4 velocities, got {len(msg.data)}")
             return
 
+        self.last_command_time = time.monotonic()
+        if self.deadman_active:
+            self.get_logger().info("Deadman switch reset. Resuming motion.")
+            self.deadman_active = False
+
         # Clamp all inputs within hardware limits safely
         clipped = [max(-self.max_vel, min(self.max_vel, val)) for val in msg.data[:4]]
 
@@ -74,33 +84,46 @@ class MotorSystemNode(Node):
 
     def control_loop(self):
         """Calculates time delta and updates hardware drivers smoothly."""
-        now = time.monotonic()
-        dt = now - self.last_control_time
-        self.last_control_time = now
+        try:
+            now = time.monotonic()
+            dt = now - self.last_control_time
+            self.last_control_time = now
 
-        if dt <= 0.0:
-            dt = self.control_period
+            if dt <= 0.0:
+                dt = self.control_period
 
-        # Ramps jerk-limited profile down to hardware controllers
-        motor_lib.control_motors(self.target_speeds, dt)
+            # Trigger 1s deadman failsafe
+            if (now - self.last_command_time > self.deadman_timeout) and not self.deadman_active:
+                self.get_logger().warn("Deadman switch triggered! No command received for 1s. Stopping motors.")
+                self.target_speeds = [0.0, 0.0, 0.0, 0.0]
+                self.deadman_active = True
+
+            # Ramps jerk-limited profile down to hardware controllers
+            motor_lib.control_motors(self.target_speeds, dt)
+        except Exception as e:
+            self.get_logger().error(f"Control loop error caught to prevent crash: {e}")
+            motor_lib.control_motors([0.0, 0.0, 0.0, 0.0], dt)
 
     def publish_joint_states(self):
-        msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = self.joint_names
+        try:
+            msg = JointState()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.name = self.joint_names
 
-        positions_steps = motor_lib.get_positions() or [0, 0, 0, 0]
-        velocities = motor_lib.get_velocities_rad() or [0.0, 0.0, 0.0, 0.0]
+            positions_steps = motor_lib.get_positions() or [0, 0, 0, 0]
+            velocities = motor_lib.get_velocities_rad() or [0.0, 0.0, 0.0, 0.0]
 
-        # Convert raw steps (12-bit encoder) to radians
-        msg.position = [p * (2.0 * math.pi) / 4096 for p in positions_steps]
-        
-        # Invert right-side telemetry vectors to match ROS frame standards
-        velocities[1] *= -1
-        velocities[3] *= -1 
-        msg.velocity = velocities
+            # Convert raw steps (12-bit encoder) to radians
+            msg.position = [p * (2.0 * math.pi) / 4096 for p in positions_steps]
+            
+            # Invert right-side telemetry vectors to match ROS frame standards
+            velocities[1] *= -1
+            velocities[3] *= -1 
+            msg.velocity = velocities
 
-        self.joint_pub.publish(msg)
+            self.joint_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Joint state publish error caught to prevent crash: {e}")
 
     def destroy_node(self):
         motor_lib.shutdown()
@@ -114,6 +137,8 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except BaseException as e:
+        node.get_logger().error(f"Fatal executor exception caught: {e}")
     finally:
         node.destroy_node()
         rclpy.shutdown()
