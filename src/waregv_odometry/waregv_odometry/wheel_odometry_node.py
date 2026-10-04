@@ -61,6 +61,8 @@ class WheelOnlyOdom(Node):
         self.x = self.y = self.th = 0.0
         self.last_t = None
         self.last_pos = None
+        
+        self.get_logger().info(f"############## WHEEL SEPERATION {self.sep} ##############")
 
         self.pub = self.create_publisher(Odometry, str(g('odom_topic')), 20)
         self.tfb = TransformBroadcaster(self)
