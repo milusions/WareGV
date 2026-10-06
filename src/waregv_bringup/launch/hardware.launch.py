@@ -264,7 +264,7 @@ def generate_launch_description():
                     period=5.0,
                     actions=[
                         _banner(5, "High-level autonomy (mapping, navigation, suite, vision)"),
-                        waregv_mapping,
+                        # waregv_mapping,
                         waregv_navigation,
                         waregv_suite,
                         waregv_vision,
