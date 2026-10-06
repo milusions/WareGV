@@ -8,7 +8,7 @@ from rclpy.node import Node
 import waregv_user_interfaces.qt_link as qt_link
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
-from nav2_msgs.msg import BehaviorTreeLog
+from rcl_interfaces.msg import Log
 from std_msgs.msg import String
 
 class ArduinoNavBridge(Node):
@@ -18,7 +18,6 @@ class ArduinoNavBridge(Node):
         # Config parameters
         self.declare_parameter('port', '/dev/arduino_nano')
         self.declare_parameter('baudrate', 115200)
-        # How often (seconds) to poll for a valid IP until we find one
         self.declare_parameter('ip_poll_period_sec', 2.0)
 
         port = self.get_parameter('port').value
@@ -29,11 +28,24 @@ class ArduinoNavBridge(Node):
 
         # State tracking
         self.current_goal_status = None
-        self.active_bt_node = None
         self.last_sent_state = None
         self.last_sent_media = None
 
-        # Subscribe to the Nav2 action server status
+        # State variables for OLED, Warn Light & Headlights
+        self.current_title = "IDLE"
+        self.current_subtitle = "Waiting for instructions"
+        self.current_action = "none"
+        self.current_warn_light = "OFF"
+        self.current_headlight_mode = "OFF"
+        self.warn_light_timer = None
+
+        # Regex matching app.js precisely
+        self.navmap_re = re.compile(
+            r"nav|planner|controller|bt_|behavior|costmap|amcl|slam|map|waypoint|smoother|recovery|lifecycle|goal|path|locali",
+            re.IGNORECASE
+        )
+
+        # High-level goal tracking
         self.status_sub = self.create_subscription(
             GoalStatusArray,
             '/navigate_to_pose/_action/status',
@@ -41,11 +53,19 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # Subscribe to the Behavior Tree Log for minute detail tracking
-        self.bt_log_sub = self.create_subscription(
-            BehaviorTreeLog,
-            '/behavior_tree_log',
-            self.bt_log_cb,
+        # Replaced BT Log with /rosout to instantly parse active logs
+        self.rosout_sub = self.create_subscription(
+            Log,
+            '/rosout',
+            self.rosout_cb,
+            100
+        )
+
+        # Headlight mode tracking
+        self.headlight_sub = self.create_subscription(
+            String,
+            '/headlight_mode',
+            self.headlight_cb,
             10
         )
 
@@ -56,40 +76,33 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # --- IP discovery timer ---------------------------------------------
-        # Poll for a valid IP address; once we have one, notify Qt and stop.
-        # This handles the common case where the network interface isn't up
-        # yet at boot time, so __init__'s first send_state might carry ip=None.
+        # --- IP discovery timer ---
         qt_link.send_to_qt({"ip": "Fetching ip..."})
         self.ip_timer = self.create_timer(ip_poll_period, self.ip_timer_cb)
 
-        # Initialize state with whatever IP we have right now (may be None).
-       
-        self.send_state("WareGV", "", "")
+        # Initialization
+        self.current_title = "WareGV"
+        self.current_subtitle = ""
+        self.current_action = ""
+        self.send_current_state()
         self.publish_media("initialized.mp4")
 
     def ip_timer_cb(self):
-        """Poll for a valid IP; send it to Qt and cancel the timer once found."""
         ip = self.get_ip_address()
         if ip:
             try:
-                qt_link.send_to_qt({"ip": ip})
+                self.send_current_state()
                 self.get_logger().info(f"IP address resolved and sent to Qt: {ip}")
             except Exception as e:
                 self.get_logger().warn(f"Failed to send IP to Qt: {e}")
 
-            # We have what we need - stop polling.
             if self.ip_timer is not None:
                 self.ip_timer.cancel()
                 self.destroy_timer(self.ip_timer)
                 self.ip_timer = None
-        else:
-            self.get_logger().debug("IP not available yet, will retry...")
 
     def get_ip_address(self):
-        """Helper to get the primary IP address of the device."""
         try:
-            # Connects to a dummy external address to find the preferred local IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.settimeout(0.5)
             s.connect(("8.8.8.8", 80))
@@ -97,113 +110,118 @@ class ArduinoNavBridge(Node):
             s.close()
             return ip
         except Exception:
-            return None  # Fallback if no network
+            return None
 
     def status_cb(self, msg: GoalStatusArray):
         if not msg.status_list:
             return
 
-        # Grab the latest goal tracking index
         current_goal = msg.status_list[-1]
         status = current_goal.status
 
-        # Only process and evaluate if the high-level state changes
+        # Immediately override lower-level log states on major status changes
         if status != self.current_goal_status:
             self.current_goal_status = status
-            self.evaluate_and_send_state()
+            self.evaluate_goal_status()
 
-    def bt_log_cb(self, msg: BehaviorTreeLog):
-        if not msg.event_log:
+    def rosout_cb(self, msg: Log):
+        # Filter identical to the NAVMAP_RE logic in app.js
+        if not self.navmap_re.search(msg.name) and not self.navmap_re.search(msg.msg):
             return
 
-        changed = False
-        for event in msg.event_log:
-            if event.current_status == 'RUNNING':
-                self.active_bt_node = event.node_name
-                changed = True
+        # Clean whitespace similar to the dashboard JS logic
+        log_text = " ".join(msg.msg.split())
 
-        if changed:
-            self.evaluate_and_send_state()
+        # Update sub-states only if actively navigating (prevents stuck states when aborted)
+        if self.current_goal_status == GoalStatus.STATUS_EXECUTING:
+            if re.search(r"recover|spin|back ?up|wait|clear ?costmap|assisted_teleop", log_text, re.IGNORECASE):
+                self.current_title = "RECOVERING"
+                self.current_action = "spinner"
+            elif re.search(r"computepathtopose|compute_path|planner|smoothpath|smooth_path", log_text, re.IGNORECASE):
+                self.current_title = "REPLANNING"
+                self.current_action = "spinner"
+            elif re.search(r"followpath|follow_path", log_text, re.IGNORECASE):
+                self.current_title = "NAVIGATING"
+                self.current_action = "loader"
 
-    def evaluate_and_send_state(self):
-        title = "IDLE"
-        subtitle = "Waiting for instructions"
-        action = ""
+            self.current_subtitle = log_text
+            self.send_current_state()
+
+    def headlight_cb(self, msg: String):
+        self.current_headlight_mode = msg.data
+        self.send_current_state()
+
+    def evaluate_goal_status(self):
         media_file = ""
 
-        # Goal Status Mapping logic & Media Assignment
         if self.current_goal_status == GoalStatus.STATUS_ACCEPTED:
-            title = "GOAL ACCEPTED"
-            subtitle = "Preparing route..."
-            action = "spinner"
+            self.current_title = "GOAL ACCEPTED"
+            self.current_subtitle = "Preparing route..."
+            self.current_action = "spinner"
+            self.start_nav_light()
             media_file = "preparing.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_EXECUTING:
-            # Drop down into minute BT node details if available
-            if self.active_bt_node:
-                node_name = self.active_bt_node
-
-                # Regex matching logic mirroring your app.js classifications
-                if re.search(r"recover|spin|back ?up|wait|clear ?costmap|assisted_teleop", node_name, re.IGNORECASE):
-                    title = "RECOVERING"
-                    subtitle = f"Executing: {node_name}"
-                    action = "spinner"
-                    media_file = "recovering.mp4"
-                elif re.search(r"computepathtopose|compute_path|planner|smoothpath|smooth_path", node_name, re.IGNORECASE):
-                    title = "REPLANNING"
-                    subtitle = "Computing new path..."
-                    action = "spinner"
-                    media_file = "replanning.mp4"
-                elif re.search(r"followpath|follow_path", node_name, re.IGNORECASE):
-                    title = "NAVIGATING"
-                    subtitle = "Following optimal path"
-                    action = "loader"
-                    media_file = "navigating.mp4"
-                else:
-                    # Fallback for unrecognized BT nodes
-                    title = "NAVIGATING"
-                    subtitle = f"Running {node_name}"
-                    action = "loader"
-                    media_file = "navigating.mp4"
-            else:
-                title = "NAVIGATING"
-                subtitle = "En route to destination"
-                action = "loader"
-                media_file = "navigating.mp4"
+            self.current_title = "NAVIGATING"
+            self.current_subtitle = "En route to destination"
+            self.current_action = "loader"
+            self.start_nav_light()
+            media_file = "navigating.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_SUCCEEDED:
-            title = "ARRIVED"
-            subtitle = "Destination reached"
-            action = "none"
+            self.current_title = "ARRIVED"
+            self.current_subtitle = "Destination reached"
+            self.current_action = "none"
+            self.turn_off_warn_light()
             media_file = "arrived.mp4"
-            self.active_bt_node = None  # Reset BT active node
 
         elif self.current_goal_status == GoalStatus.STATUS_ABORTED:
-            title = "NAV ABORTED"
-            subtitle = "Navigation failed"
-            action = "none"
+            self.current_title = "NAV ABORTED"
+            self.current_subtitle = "Navigation failed"
+            self.current_action = "none"
+            self.trigger_error_light()
             media_file = "nav_aborted.mp4"
-            self.active_bt_node = None
 
         elif self.current_goal_status == GoalStatus.STATUS_CANCELED:
-            title = "NAV CANCELED"
-            subtitle = "Navigation stopped"
-            action = "none"
+            self.current_title = "NAV CANCELED"
+            self.current_subtitle = "Navigation stopped"
+            self.current_action = "none"
+            self.trigger_error_light()
             media_file = "nav_canceled.mp4"
-            self.active_bt_node = None
 
-        self.send_state(title, subtitle, action)
-        media_file = ""
+        self.send_current_state()
         if media_file:
             self.publish_media(media_file)
 
-    def send_state(self, title, subtitle, action):
-        # Package state including IP address and prevent serial flooding
+    def start_nav_light(self):
+        if self.warn_light_timer:
+            self.warn_light_timer.cancel()
+            self.warn_light_timer = None
+        self.current_warn_light = "PULSE_3"
+
+    def trigger_error_light(self):
+        if self.warn_light_timer:
+            self.warn_light_timer.cancel()
+        self.current_warn_light = "BLINK_5HZ"
+        # Triggers turn_off_warn_light exactly 15 seconds after goal abort/error
+        self.warn_light_timer = self.create_timer(15.0, self.turn_off_warn_light)
+
+    def turn_off_warn_light(self):
+        self.current_warn_light = "OFF"
+        self.send_current_state()
+        if self.warn_light_timer:
+            self.warn_light_timer.cancel()
+            self.warn_light_timer = None
+
+    def send_current_state(self):
+        # Strictly enforces OLED character limits before transport
         state_dict = {
             "ip": self.get_ip_address(),
-            "title": title,
-            "subtitle": subtitle[:35],  # Capped for safety on small displays
-            "action": action
+            "title": self.current_title[:14].upper(),
+            "subtitle": self.current_subtitle[:35],
+            "action": self.current_action,
+            "warn_light": self.current_warn_light,
+            "headlight_mode": self.current_headlight_mode
         }
 
         if state_dict != self.last_sent_state:
@@ -211,7 +229,6 @@ class ArduinoNavBridge(Node):
             self.last_sent_state = state_dict
 
     def publish_media(self, filename: str):
-        # Prevent spamming identical media play commands repeatedly
         pass
         # if filename != self.last_sent_media:
         #     msg = String()
