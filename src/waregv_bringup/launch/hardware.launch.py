@@ -83,7 +83,6 @@ def generate_launch_description():
 
     # =========================================================
     # STAGE 1 — Description & Hardware drivers
-    # (URDF + motor/MCU bridge + sensors; nothing downstream can run without these)
     # =========================================================
     waregv_description_launch_file_path = os.path.join(
         get_package_share_directory("waregv_description"),
@@ -105,14 +104,11 @@ def generate_launch_description():
 
     # =========================================================
     # STAGE 2 — Hardware sensor readiness barrier
-    # Only gate on /joint_states: it proves the motor system is alive
-    # and feeds robot_state_publisher -> /tf.
     # =========================================================
     joint_states_gate = _wait_for_topic("/joint_states", timeout=120.0)
 
     # =========================================================
     # STAGE 3 — /tf readiness barrier
-    # /tf only exists once robot_state_publisher has seen /joint_states.
     # =========================================================
     tf_gate = _wait_for_topic("/tf", timeout=120.0)
 
@@ -157,28 +153,8 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # STAGE 5 — High-level autonomy (mapping, navigation, suite, vision)
+    # STAGE 5 — Suite & Vision
     # =========================================================
-    waregv_mapping_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
-    )
-    waregv_mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
-    )
-
-    waregv_navigation_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_navigation"), "launch", "navigation.launch.py"
-    )
-    waregv_navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "max_linear_velocity": max_linear_velocity_conf,
-            "max_angular_velocity": max_angular_velocity_conf,
-        }.items(),
-    )
-
     waregv_suite_launch_file_path = os.path.join(
         get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
     )
@@ -196,7 +172,7 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # STAGE 6 — Bridges / UIs
+    # STAGE 6 — Bridges & User Interfaces
     # =========================================================
     rosbridge_node = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(
@@ -237,9 +213,31 @@ def generate_launch_description():
     )
 
     # =========================================================
+    # STAGE 7 — Mapping & Navigation (Delayed to boot last)
+    # =========================================================
+    waregv_mapping_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
+    )
+    waregv_mapping = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
+    )
+
+    waregv_navigation_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_navigation"), "launch", "navigation.launch.py"
+    )
+    waregv_navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_navigation_launch_file_path),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "max_linear_velocity": max_linear_velocity_conf,
+            "max_angular_velocity": max_angular_velocity_conf,
+        }.items(),
+    )
+
+    # =========================================================
     # Event-driven sequencing
     # =========================================================
-    # Stage 2 -> 3: once /joint_states is seen, wait for /tf
     start_stage3 = RegisterEventHandler(
         OnProcessExit(
             target_action=joint_states_gate,
@@ -250,8 +248,6 @@ def generate_launch_description():
         )
     )
 
-    # Stage 3 -> 4: once /tf is alive, start robot-side autonomy,
-    # and schedule Stage 5 + Stage 6 off the same trigger.
     start_stage4 = RegisterEventHandler(
         OnProcessExit(
             target_action=tf_gate,
@@ -263,9 +259,7 @@ def generate_launch_description():
                 TimerAction(
                     period=5.0,
                     actions=[
-                        _banner(5, "High-level autonomy (mapping, navigation, suite, vision)"),
-                        # waregv_mapping,
-                        waregv_navigation,
+                        _banner(5, "Suite & vision"),
                         waregv_suite,
                         waregv_vision,
                     ],
@@ -279,32 +273,31 @@ def generate_launch_description():
                         waregv_user_interfaces,
                     ],
                 ),
+                TimerAction(
+                    period=15.0,
+                    actions=[
+                        _banner(7, "Mapping & navigation (Loaded last for stability)"),
+                        waregv_mapping,
+                        waregv_navigation,
+                    ],
+                ),
             ],
         )
     )
 
     return LaunchDescription(
         [
-            # Arguments
             max_linear_velocity_arg,
             max_angular_velocity_arg,
             wheel_radius_arg,
             track_width_arg,
             map_name_arg,
-
-            # Stage 1
             _banner(1, "Descriptions & hardware drivers"),
             waregv_description,
             waregv_hardware,
-
-            # Stage 2 (start the gate immediately)
             _banner(2, "Hardware sensor readiness barrier (/joint_states)"),
             joint_states_gate,
-
-            # Stage 2 -> 3
             start_stage3,
-
-            # Stage 3 -> 4 -> {5, 6}
             start_stage4,
         ]
     )
