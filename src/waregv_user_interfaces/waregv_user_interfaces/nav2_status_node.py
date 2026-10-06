@@ -31,6 +31,7 @@ class ArduinoNavBridge(Node):
         self.current_goal_status = None
         self.last_sent_state = None
         self.last_sent_media = None
+        self.network_ip = ""
 
         # OLED / lights state
         self.current_title = "WareGV"
@@ -47,6 +48,7 @@ class ArduinoNavBridge(Node):
         # Send the initial PULSE_3 state NOW, before any subscription can fire
         self.current_warn_light = "PULSE_3"
         self.current_headlight_mode = "PULSE_3"
+        self.update_ip()
         self.force_send_current_state()
 
         # Kick off the 10s timer to turn both off
@@ -89,10 +91,8 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # --- IP discovery ---
-        qt_link.send_to_qt({"ip": "Fetching ip..."})
+        # Continually poll for IP in case network drops/changes
         self.ip_timer = self.create_timer(ip_poll_period, self.ip_timer_cb)
-
         self.publish_media("initialized.mp4")
 
     # ------------------------------------------------------------------ #
@@ -113,30 +113,25 @@ class ArduinoNavBridge(Node):
     # ------------------------------------------------------------------ #
     # IP discovery                                                        #
     # ------------------------------------------------------------------ #
-    def ip_timer_cb(self):
-        ip = self.get_ip_address()
-        if ip:
-            try:
-                self.send_current_state()
-                self.get_logger().info(f"IP address resolved and sent to Qt: {ip}")
-            except Exception as e:
-                self.get_logger().warn(f"Failed to send IP to Qt: {e}")
-
-            if self.ip_timer is not None:
-                self.ip_timer.cancel()
-                self.destroy_timer(self.ip_timer)
-                self.ip_timer = None
-
-    def get_ip_address(self):
+    def update_ip(self):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.settimeout(0.5)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
-            return ip
+            self.network_ip = ip
         except Exception:
-            return None
+            self.network_ip = ""
+
+    def ip_timer_cb(self):
+        old_ip = self.network_ip
+        self.update_ip()
+        
+        # Only push a state update if the IP actually changed
+        if old_ip != self.network_ip:
+            self.get_logger().info(f"IP address resolved/changed: {self.network_ip}")
+            self.send_current_state()
 
     # ------------------------------------------------------------------ #
     # ROS callbacks                                                       #
@@ -173,7 +168,6 @@ class ArduinoNavBridge(Node):
             self.send_current_state()
 
     def headlight_cb(self, msg: String):
-        # Ignore external headlight updates while startup sequence is running
         if self.startup_sequence_active:
             self.get_logger().debug(f"Ignoring external headlight update: {msg.data}")
             return
@@ -260,7 +254,6 @@ class ArduinoNavBridge(Node):
             )
 
     def force_send_current_state(self):
-        """Send regardless of dedupe cache."""
         state_dict = self._build_state_dict()
         qt_link.send_to_qt(state_dict)
         self.last_sent_state = state_dict
@@ -271,7 +264,7 @@ class ArduinoNavBridge(Node):
 
     def _build_state_dict(self):
         return {
-            "ip": self.get_ip_address(),
+            "ip": self.network_ip,
             "title": self.current_title[:14].upper(),
             "subtitle": self.current_subtitle[:35],
             "action": self.current_action,
