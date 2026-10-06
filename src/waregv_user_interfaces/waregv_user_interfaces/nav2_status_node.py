@@ -39,6 +39,10 @@ class ArduinoNavBridge(Node):
         self.current_headlight_mode = "OFF"
         self.warn_light_timer = None
 
+        # Startup light sequence tracking
+        self.startup_light_timer = None
+        self.startup_sequence_active = False
+
         # Regex matching app.js precisely
         self.navmap_re = re.compile(
             r"nav|planner|controller|bt_|behavior|costmap|amcl|slam|map|waypoint|smoother|recovery|lifecycle|goal|path|locali",
@@ -83,9 +87,30 @@ class ArduinoNavBridge(Node):
         # Initialization
         self.current_title = "WareGV"
         self.current_subtitle = ""
-        self.current_action = ""
+        self.current_action = ""s
         self.send_current_state()
         self.publish_media("initialized.mp4")
+
+        # Startup light sequence: PULSE_3 on warn + headlight for 10 seconds
+        self.run_startup_light_sequence()
+
+    def run_startup_light_sequence(self):
+        """Turn on both headlight and warn light in PULSE_3 mode for 10s, then turn off."""
+        self.startup_sequence_active = True
+        self.current_warn_light = "PULSE_3"
+        self.current_headlight_mode = "PULSE_3"
+        self.send_current_state()
+        self.startup_light_timer = self.create_timer(10.0, self.end_startup_light_sequence)
+
+    def end_startup_light_sequence(self):
+        self.startup_sequence_active = False
+        self.current_warn_light = "OFF"
+        self.current_headlight_mode = "OFF"
+        self.send_current_state()
+        if self.startup_light_timer:
+            self.startup_light_timer.cancel()
+            self.destroy_timer(self.startup_light_timer)
+            self.startup_light_timer = None
 
     def ip_timer_cb(self):
         ip = self.get_ip_address()
@@ -148,6 +173,9 @@ class ArduinoNavBridge(Node):
             self.send_current_state()
 
     def headlight_cb(self, msg: String):
+        # Ignore external headlight updates while startup sequence is running
+        if self.startup_sequence_active:
+            return
         self.current_headlight_mode = msg.data
         self.send_current_state()
 
