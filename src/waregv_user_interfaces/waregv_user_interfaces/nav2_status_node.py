@@ -11,6 +11,7 @@ from action_msgs.msg import GoalStatus, GoalStatusArray
 from rcl_interfaces.msg import Log
 from std_msgs.msg import String
 
+
 class ArduinoNavBridge(Node):
     def __init__(self):
         super().__init__('arduino_nav_bridge')
@@ -26,22 +27,32 @@ class ArduinoNavBridge(Node):
 
         qt_link.init(port, baud)
 
-        # State tracking
+        # --- State tracking ---
         self.current_goal_status = None
         self.last_sent_state = None
         self.last_sent_media = None
 
-        # State variables for OLED, Warn Light & Headlights
-        self.current_title = "IDLE"
-        self.current_subtitle = "Waiting for instructions"
-        self.current_action = "none"
+        # OLED / lights state
+        self.current_title = "WareGV"
+        self.current_subtitle = ""
+        self.current_action = ""
         self.current_warn_light = "OFF"
         self.current_headlight_mode = "OFF"
         self.warn_light_timer = None
 
-        # Startup light sequence tracking
+        # Startup light sequence -- flag MUST be True before subscriptions spin
         self.startup_light_timer = None
-        self.startup_sequence_active = False
+        self.startup_sequence_active = True
+
+        # Send the initial PULSE_3 state NOW, before any subscription can fire
+        self.current_warn_light = "PULSE_3"
+        self.current_headlight_mode = "PULSE_3"
+        self.force_send_current_state()
+
+        # Kick off the 10s timer to turn both off
+        self.startup_light_timer = self.create_timer(
+            10.0, self.end_startup_light_sequence
+        )
 
         # Regex matching app.js precisely
         self.navmap_re = re.compile(
@@ -49,7 +60,7 @@ class ArduinoNavBridge(Node):
             re.IGNORECASE
         )
 
-        # High-level goal tracking
+        # --- Subscriptions (created AFTER startup PULSE_3 is on the wire) ---
         self.status_sub = self.create_subscription(
             GoalStatusArray,
             '/navigate_to_pose/_action/status',
@@ -57,7 +68,6 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # Replaced BT Log with /rosout to instantly parse active logs
         self.rosout_sub = self.create_subscription(
             Log,
             '/rosout',
@@ -65,7 +75,6 @@ class ArduinoNavBridge(Node):
             100
         )
 
-        # Headlight mode tracking
         self.headlight_sub = self.create_subscription(
             String,
             '/headlight_mode',
@@ -80,38 +89,30 @@ class ArduinoNavBridge(Node):
             10
         )
 
-        # --- IP discovery timer ---
+        # --- IP discovery ---
         qt_link.send_to_qt({"ip": "Fetching ip..."})
         self.ip_timer = self.create_timer(ip_poll_period, self.ip_timer_cb)
 
-        # Initialization
-        self.current_title = "WareGV"
-        self.current_subtitle = ""
-        self.current_action = ""
-        self.send_current_state()
         self.publish_media("initialized.mp4")
 
-        # Startup light sequence: PULSE_3 on warn + headlight for 10 seconds
-        self.run_startup_light_sequence()
-
-    def run_startup_light_sequence(self):
-        """Turn on both headlight and warn light in PULSE_3 mode for 10s, then turn off."""
-        self.startup_sequence_active = True
-        self.current_warn_light = "PULSE_3"
-        self.current_headlight_mode = "OFF"
-        self.send_current_state()
-        self.startup_light_timer = self.create_timer(10.0, self.end_startup_light_sequence)
-
+    # ------------------------------------------------------------------ #
+    # Startup light sequence                                              #
+    # ------------------------------------------------------------------ #
     def end_startup_light_sequence(self):
+        self.get_logger().info("Startup light sequence: turning both lights OFF")
         self.startup_sequence_active = False
         self.current_warn_light = "OFF"
         self.current_headlight_mode = "OFF"
-        self.send_current_state()
+        self.force_send_current_state()
+
         if self.startup_light_timer:
             self.startup_light_timer.cancel()
             self.destroy_timer(self.startup_light_timer)
             self.startup_light_timer = None
 
+    # ------------------------------------------------------------------ #
+    # IP discovery                                                        #
+    # ------------------------------------------------------------------ #
     def ip_timer_cb(self):
         ip = self.get_ip_address()
         if ip:
@@ -137,6 +138,9 @@ class ArduinoNavBridge(Node):
         except Exception:
             return None
 
+    # ------------------------------------------------------------------ #
+    # ROS callbacks                                                       #
+    # ------------------------------------------------------------------ #
     def status_cb(self, msg: GoalStatusArray):
         if not msg.status_list:
             return
@@ -144,20 +148,16 @@ class ArduinoNavBridge(Node):
         current_goal = msg.status_list[-1]
         status = current_goal.status
 
-        # Immediately override lower-level log states on major status changes
         if status != self.current_goal_status:
             self.current_goal_status = status
             self.evaluate_goal_status()
 
     def rosout_cb(self, msg: Log):
-        # Filter identical to the NAVMAP_RE logic in app.js
         if not self.navmap_re.search(msg.name) and not self.navmap_re.search(msg.msg):
             return
 
-        # Clean whitespace similar to the dashboard JS logic
         log_text = " ".join(msg.msg.split())
 
-        # Update sub-states only if actively navigating (prevents stuck states when aborted)
         if self.current_goal_status == GoalStatus.STATUS_EXECUTING:
             if re.search(r"recover|spin|back ?up|wait|clear ?costmap|assisted_teleop", log_text, re.IGNORECASE):
                 self.current_title = "RECOVERING"
@@ -175,10 +175,16 @@ class ArduinoNavBridge(Node):
     def headlight_cb(self, msg: String):
         # Ignore external headlight updates while startup sequence is running
         if self.startup_sequence_active:
+            self.get_logger().debug(f"Ignoring external headlight update: {msg.data}")
             return
-        self.current_headlight_mode = msg.data
-        self.send_current_state()
+        if msg.data != self.current_headlight_mode:
+            self.get_logger().info(f"External headlight update: {msg.data}")
+            self.current_headlight_mode = msg.data
+            self.send_current_state()
 
+    # ------------------------------------------------------------------ #
+    # Goal status handling                                                #
+    # ------------------------------------------------------------------ #
     def evaluate_goal_status(self):
         media_file = ""
 
@@ -231,7 +237,6 @@ class ArduinoNavBridge(Node):
         if self.warn_light_timer:
             self.warn_light_timer.cancel()
         self.current_warn_light = "BLINK_5HZ"
-        # Triggers turn_off_warn_light exactly 15 seconds after goal abort/error
         self.warn_light_timer = self.create_timer(15.0, self.turn_off_warn_light)
 
     def turn_off_warn_light(self):
@@ -241,29 +246,41 @@ class ArduinoNavBridge(Node):
             self.warn_light_timer.cancel()
             self.warn_light_timer = None
 
+    # ------------------------------------------------------------------ #
+    # Serial output                                                       #
+    # ------------------------------------------------------------------ #
     def send_current_state(self):
-        # Strictly enforces OLED character limits before transport
-        state_dict = {
+        state_dict = self._build_state_dict()
+        if state_dict != self.last_sent_state:
+            qt_link.send_to_qt(state_dict)
+            self.last_sent_state = state_dict
+            self.get_logger().info(
+                f"QT SEND: warn={state_dict['warn_light_mode']} "
+                f"headlight={state_dict['headlight_mode']}"
+            )
+
+    def force_send_current_state(self):
+        """Send regardless of dedupe cache."""
+        state_dict = self._build_state_dict()
+        qt_link.send_to_qt(state_dict)
+        self.last_sent_state = state_dict
+        self.get_logger().info(
+            f"QT SEND (forced): warn={state_dict['warn_light_mode']} "
+            f"headlight={state_dict['headlight_mode']}"
+        )
+
+    def _build_state_dict(self):
+        return {
             "ip": self.get_ip_address(),
             "title": self.current_title[:14].upper(),
             "subtitle": self.current_subtitle[:35],
             "action": self.current_action,
-            "warn_light": self.current_warn_light,
-            "headlight_mode": self.current_headlight_mode
+            "warn_light_mode": self.current_warn_light,
+            "headlight_mode": self.current_headlight_mode,
         }
-
-        if state_dict != self.last_sent_state:
-            qt_link.send_to_qt(state_dict)
-            self.last_sent_state = state_dict
 
     def publish_media(self, filename: str):
         pass
-        # if filename != self.last_sent_media:
-        #     msg = String()
-        #     msg.data = filename
-        #     self.media_pub.publish(msg)
-        #     self.last_sent_media = filename
-        #     self.get_logger().info(f"Triggered media playback for state: {filename}")
 
 
 def main(args=None):
