@@ -87,7 +87,7 @@ class ArduinoNavBridge(Node):
         # Initialization
         self.current_title = "WareGV"
         self.current_subtitle = ""
-        self.current_action = ""s
+        self.current_action = ""
         self.send_current_state()
         self.publish_media("initialized.mp4")
 
@@ -98,7 +98,7 @@ class ArduinoNavBridge(Node):
         """Turn on both headlight and warn light in PULSE_3 mode for 10s, then turn off."""
         self.startup_sequence_active = True
         self.current_warn_light = "PULSE_3"
-        self.current_headlight_mode = "PULSE_3"
+        self.current_headlight_mode = "OFF"
         self.send_current_state()
         self.startup_light_timer = self.create_timer(10.0, self.end_startup_light_sequence)
 
