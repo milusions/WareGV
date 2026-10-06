@@ -45,6 +45,13 @@ class JoystickController(Node):
             10
         )
 
+        # Create Client for nav2 cancel goal service
+        from action_msgs.srv import CancelGoal
+        self.cancel_client_ = self.create_client(
+            CancelGoal,
+            '/navigate_to_pose/_action/cancel_goal'
+        )
+
         # Configurable velocity scaling factors
         self.declare_parameter('max_linear_vel', 0.11)
         self.declare_parameter('max_angular_vel', 0.35)
@@ -53,9 +60,11 @@ class JoystickController(Node):
 
         # --- Arm/Disarm latching state ---
         self.is_armed = False
-        self.prev_button_0 = 0   # for edge detection (arm + light off)
+        self.prev_button_0 = 0   # for edge detection (arm)
         self.prev_button_1 = 0   # for edge detection (light on)
+        self.prev_button_2 = 0   # for edge detection (light off)
         self.prev_button_3 = 0   # for edge detection (disarm)
+        self.prev_button_5 = 0   # for edge detection (abort nav)
 
         # --- Headlight blink timer ---
         self.headlight_timer = None
@@ -95,7 +104,7 @@ class JoystickController(Node):
         self._publish_headlight("ON")
 
     def _handle_light_off(self):
-        """Button[0]: turn headlight OFF."""
+        """Button[2]: turn headlight OFF."""
         self._cancel_headlight_timer()
         self._publish_headlight("OFF")
 
@@ -129,32 +138,68 @@ class JoystickController(Node):
         self._start_headlight_sequence("BLINK_2HZ", 2.0)
 
     # ------------------------------------------------------------------ #
+    # Nav2 abort                                                          #
+    # ------------------------------------------------------------------ #
+    def _handle_abort_nav(self):
+        """Button[5]: cancel the current nav2 goal (same as app.js Cancel)."""
+        if not self.cancel_client_.service_is_ready():
+            self.get_logger().warn(
+                'Nav2 cancel service not available yet - ignoring abort.'
+            )
+            return
+
+        from action_msgs.srv import CancelGoal
+        req = CancelGoal.Request()
+        # Empty goal_info with zero UUID = cancel ALL goals (matches app.js {})
+        future = self.cancel_client_.call_async(req)
+        future.add_done_callback(self._abort_done)
+        self.get_logger().info('Nav2 abort (cancel all goals) requested.')
+
+    def _abort_done(self, future):
+        try:
+            future.result()
+            self.get_logger().info('Nav2 cancel_goal service call completed.')
+        except Exception as e:
+            self.get_logger().error(f'Nav2 cancel_goal call failed: {e}')
+
+    # ------------------------------------------------------------------ #
     # Joy callback                                                        #
     # ------------------------------------------------------------------ #
     def joy_callback(self, msg: Joy):
 
         # --- Button edge detection (must have enough buttons) ---
-        if len(msg.buttons) > 4:
+        if len(msg.buttons) > 5:
             button_0 = msg.buttons[0]
             button_1 = msg.buttons[1]
+            button_2 = msg.buttons[2]
             button_3 = msg.buttons[3]
+            button_5 = msg.buttons[5]
 
-            # Arm + light OFF: rising edge on button[0]
+            # Arm: rising edge on button[0]
             if button_0 == 1 and self.prev_button_0 == 0:
                 self._handle_arm()
-                self._handle_light_off()
 
             # Light ON: rising edge on button[1]
             if button_1 == 1 and self.prev_button_1 == 0:
                 self._handle_light_on()
 
+            # Light OFF: rising edge on button[2]
+            if button_2 == 1 and self.prev_button_2 == 0:
+                self._handle_light_off()
+
             # Disarm: rising edge on button[3]
             if button_3 == 1 and self.prev_button_3 == 0:
                 self._handle_disarm()
 
+            # Abort nav2: rising edge on button[5]
+            if button_5 == 1 and self.prev_button_5 == 0:
+                self._handle_abort_nav()
+
             self.prev_button_0 = button_0
             self.prev_button_1 = button_1
+            self.prev_button_2 = button_2
             self.prev_button_3 = button_3
+            self.prev_button_5 = button_5
 
         if len(msg.axes) < 2:
             return
