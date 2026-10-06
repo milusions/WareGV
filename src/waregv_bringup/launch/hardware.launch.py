@@ -267,18 +267,19 @@ def generate_launch_description():
                 TimerAction(
                     period=10.0,
                     actions=[
-                        _banner(6, "Bridges & user interfaces"),
+                        _banner(6, "Bridges "),
                         rosbridge_node,
                         foxglove_bridge,
-                        waregv_user_interfaces,
+                               waregv_user_interfaces,
                     ],
                 ),
                 TimerAction(
                     period=15.0,
                     actions=[
-                        _banner(7, "Mapping & navigation (Loaded last for stability)"),
+                        _banner(7, "Mapping , navigation & user interfaces (Loaded last for stability)"),
                         waregv_mapping,
                         waregv_navigation,
+                 
                     ],
                 ),
             ],
