@@ -153,7 +153,18 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # STAGE 5 — Suite & Vision
+    # STAGE 5 — Mapping (Loaded first for CPU priority and stability)
+    # =========================================================
+    waregv_mapping_launch_file_path = os.path.join(
+        get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
+    )
+    waregv_mapping = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
+    )
+
+    # =========================================================
+    # STAGE 6 — Suite & Vision
     # =========================================================
     waregv_suite_launch_file_path = os.path.join(
         get_package_share_directory("waregv_suite"), "launch", "suite.launch.py"
@@ -172,7 +183,7 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # STAGE 6 — Bridges & User Interfaces
+    # STAGE 7 — Bridges & User Interfaces
     # =========================================================
     rosbridge_node = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(
@@ -213,16 +224,8 @@ def generate_launch_description():
     )
 
     # =========================================================
-    # STAGE 7 — Mapping & Navigation (Delayed to boot last)
+    # STAGE 8 — Navigation (Loaded last)
     # =========================================================
-    waregv_mapping_launch_file_path = os.path.join(
-        get_package_share_directory("waregv_mapping"), "launch", "mapping.launch.py"
-    )
-    waregv_mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(waregv_mapping_launch_file_path),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
-    )
-
     waregv_navigation_launch_file_path = os.path.join(
         get_package_share_directory("waregv_navigation"), "launch", "navigation.launch.py"
     )
@@ -257,27 +260,33 @@ def generate_launch_description():
                 waregv_odometry,
                 waregv_controller,
                 TimerAction(
-                    period=5.0,
+                    period=3.0,
                     actions=[
-                        _banner(5, "Suite & vision"),
+                        _banner(5, "Mapping (isolated for CPU stability)"),
+                        waregv_mapping,
+                    ],
+                ),
+                TimerAction(
+                    period=8.0,
+                    actions=[
+                        _banner(6, "Suite & vision"),
                         waregv_suite,
                         waregv_vision,
                     ],
                 ),
                 TimerAction(
-                    period=10.0,
+                    period=13.0,
                     actions=[
-                        _banner(6, "Bridges & user interfaces"),
+                        _banner(7, "Bridges & user interfaces"),
                         rosbridge_node,
                         foxglove_bridge,
                         waregv_user_interfaces,
                     ],
                 ),
                 TimerAction(
-                    period=15.0,
+                    period=18.0,
                     actions=[
-                        _banner(7, "Mapping & navigation (Loaded last for stability)"),
-                        waregv_mapping,
+                        _banner(8, "Navigation"),
                         waregv_navigation,
                     ],
                 ),
