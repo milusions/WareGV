@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Joy, LaserScan
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, String, Float32
 import numpy as np
+import time
 
 
 class JoystickController(Node):
@@ -21,6 +22,14 @@ class JoystickController(Node):
             Joy,
             '/joy',
             self.joy_callback,
+            10
+        )
+
+        # Create Subscriber for scan (obstacle proximity)
+        self.scan_sub_ = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
             10
         )
 
@@ -45,6 +54,13 @@ class JoystickController(Node):
             10
         )
 
+        # Create Publisher for vibration (haptic feedback)
+        self.vibration_pub_ = self.create_publisher(
+            Float32,
+            '/vibration',
+            10
+        )
+
         # Create Client for nav2 cancel goal service
         from action_msgs.srv import CancelGoal
         self.cancel_client_ = self.create_client(
@@ -56,18 +72,26 @@ class JoystickController(Node):
         self.declare_parameter('max_linear_vel', 0.11)
         self.declare_parameter('max_angular_vel', 0.35)
 
+        # Vibration config
+        self.declare_parameter('vibration_cooldown_sec', 1.0)
+
         self.send_stop = True
 
         # --- Arm/Disarm latching state ---
         self.is_armed = False
-        self.prev_button_0 = 0   # for edge detection (arm)
-        self.prev_button_1 = 0   # for edge detection (light on)
-        self.prev_button_2 = 0   # for edge detection (light off)
-        self.prev_button_3 = 0   # for edge detection (disarm)
-        self.prev_button_5 = 0   # for edge detection (abort nav)
+        self.prev_button_0 = 0   # arm
+        self.prev_button_1 = 0   # light on
+        self.prev_button_2 = 0   # light off
+        self.prev_button_3 = 0   # disarm
+        self.prev_button_5 = 0   # abort nav
 
         # --- Headlight blink timer ---
         self.headlight_timer = None
+
+        # --- Vibration state ---
+        self.vibration_timer = None
+        self.vibration_cooldown_timer = None
+        self.vibration_busy = False   # pulsing OR cooling down
 
         self.get_logger().info('JoystickController node has been initialized.')
 
@@ -91,7 +115,6 @@ class JoystickController(Node):
         self._cancel_headlight_timer()
 
     def _start_headlight_sequence(self, mode: str, duration: float):
-        """Blink headlight in `mode` for `duration` seconds, then turn OFF."""
         self._cancel_headlight_timer()
         self._publish_headlight(mode)
         self.headlight_timer = self.create_timer(
@@ -99,12 +122,10 @@ class JoystickController(Node):
         )
 
     def _handle_light_on(self):
-        """Button[1]: turn headlight ON (solid, no auto-off)."""
         self._cancel_headlight_timer()
         self._publish_headlight("ON")
 
     def _handle_light_off(self):
-        """Button[2]: turn headlight OFF."""
         self._cancel_headlight_timer()
         self._publish_headlight("OFF")
 
@@ -121,7 +142,6 @@ class JoystickController(Node):
         arm_msg.data = True
         self.arm_pub_.publish(arm_msg)
 
-        # Blink 2Hz for 5 seconds, then OFF
         self._start_headlight_sequence("BLINK_2HZ", 5.0)
 
     def _handle_disarm(self):
@@ -134,14 +154,12 @@ class JoystickController(Node):
         arm_msg.data = False
         self.arm_pub_.publish(arm_msg)
 
-        # Blink 2Hz for 2 seconds, then OFF
         self._start_headlight_sequence("BLINK_2HZ", 2.0)
 
     # ------------------------------------------------------------------ #
     # Nav2 abort                                                          #
     # ------------------------------------------------------------------ #
     def _handle_abort_nav(self):
-        """Button[5]: cancel the current nav2 goal (same as app.js Cancel)."""
         if not self.cancel_client_.service_is_ready():
             self.get_logger().warn(
                 'Nav2 cancel service not available yet - ignoring abort.'
@@ -150,7 +168,6 @@ class JoystickController(Node):
 
         from action_msgs.srv import CancelGoal
         req = CancelGoal.Request()
-        # Empty goal_info with zero UUID = cancel ALL goals (matches app.js {})
         future = self.cancel_client_.call_async(req)
         future.add_done_callback(self._abort_done)
         self.get_logger().info('Nav2 abort (cancel all goals) requested.')
@@ -161,6 +178,74 @@ class JoystickController(Node):
             self.get_logger().info('Nav2 cancel_goal service call completed.')
         except Exception as e:
             self.get_logger().error(f'Nav2 cancel_goal call failed: {e}')
+
+    # ------------------------------------------------------------------ #
+    # Vibration / haptic feedback                                         #
+    # ------------------------------------------------------------------ #
+    def _publish_vibration(self, intensity: float):
+        msg = Float32()
+        msg.data = float(intensity)
+        self.vibration_pub_.publish(msg)
+
+    def _stop_vibration(self):
+        self._publish_vibration(0.0)
+        if self.vibration_timer is not None:
+            self.vibration_timer.cancel()
+            self.destroy_timer(self.vibration_timer)
+            self.vibration_timer = None
+
+    def _vibration_cooldown_end(self):
+        self.vibration_busy = False
+        if self.vibration_cooldown_timer is not None:
+            self.vibration_cooldown_timer.cancel()
+            self.destroy_timer(self.vibration_cooldown_timer)
+            self.vibration_cooldown_timer = None
+
+    def _trigger_vibration(self, intensity: float, duration: float):
+        """Pulse vibration at `intensity` for `duration` seconds, then stop.
+        Enforces a cooldown after the pulse so it doesn't re-fire every scan."""
+        if self.vibration_busy:
+            return
+
+        self.vibration_busy = True
+        self.get_logger().warn(
+            f'Obstacle detected! Vibration {intensity} for {duration}s'
+        )
+        self._publish_vibration(intensity)
+
+        # One-shot timer to stop vibration
+        self.vibration_timer = self.create_timer(duration, self._stop_vibration)
+
+        # After stop, enter cooldown before next trigger is allowed
+        cooldown = self.get_parameter('vibration_cooldown_sec').value
+        self.vibration_cooldown_timer = self.create_timer(
+            duration + cooldown, self._vibration_cooldown_end
+        )
+
+    def scan_callback(self, msg: LaserScan):
+        """Check nearest valid range and trigger haptic feedback accordingly.
+
+        Priority:
+          - nearest <= 0.10 m  -> intensity 1.0 for 2 s
+          - nearest <= 0.20 m  -> intensity 0.4 for 3 s
+        """
+        if self.vibration_busy:
+            return
+
+        valid = [
+            r for r in msg.ranges
+            if r is not None and np.isfinite(r)
+            and msg.range_min < r < msg.range_max
+        ]
+        if not valid:
+            return
+
+        nearest = min(valid)
+
+        if nearest <= 0.10:
+            self._trigger_vibration(1.0, 2.0)
+        elif nearest <= 0.20:
+            self._trigger_vibration(0.4, 3.0)
 
     # ------------------------------------------------------------------ #
     # Joy callback                                                        #
@@ -175,23 +260,18 @@ class JoystickController(Node):
             button_3 = msg.buttons[3]
             button_5 = msg.buttons[5]
 
-            # Arm: rising edge on button[0]
             if button_0 == 1 and self.prev_button_0 == 0:
                 self._handle_arm()
 
-            # Light ON: rising edge on button[1]
             if button_1 == 1 and self.prev_button_1 == 0:
                 self._handle_light_on()
 
-            # Light OFF: rising edge on button[2]
             if button_2 == 1 and self.prev_button_2 == 0:
                 self._handle_light_off()
 
-            # Disarm: rising edge on button[3]
             if button_3 == 1 and self.prev_button_3 == 0:
                 self._handle_disarm()
 
-            # Abort nav2: rising edge on button[5]
             if button_5 == 1 and self.prev_button_5 == 0:
                 self._handle_abort_nav()
 
