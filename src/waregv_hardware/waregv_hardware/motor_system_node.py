@@ -6,7 +6,7 @@ import time
 import rclpy
 from rclpy.node import Node
 
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Bool
 from sensor_msgs.msg import JointState
 from ament_index_python.packages import get_package_share_directory
 import waregv_hardware.motor_system_lib.motor_system as motor_lib
@@ -32,12 +32,17 @@ class MotorSystemNode(Node):
         self.max_vel = 9.0  # rad/s safety cap
         self.target_speeds = [0.0, 0.0, 0.0, 0.0]
 
+        # Arming state tracking
+        self.is_armed = False
+        self.arm_time = 0.0
+
         pkg_share = get_package_share_directory("waregv_hardware")
         motor_config = os.path.join(pkg_share, "config", "motor_system_config.yaml")
         
         motor_lib.init(port_left, port_right, f_id, r_id, motor_config)
 
         # Communication setup
+        self.arm_sub = self.create_subscription(Bool, '/motor_arm', self.arm_cb, 10)
         self.cmd_sub = self.create_subscription(Float64MultiArray, '/motor_system/commands', self.command_cb, 10)
         self.clipped_pub = self.create_publisher(Float64MultiArray, '/motor_system/clipped_commands', 10)
         self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
@@ -62,15 +67,35 @@ class MotorSystemNode(Node):
             'rear_left_wheel_joint', 'rear_right_wheel_joint'
         ]
 
+    def arm_cb(self, msg: Bool):
+        """Handles the /motor_arm state transitions."""
+        if msg.data and not self.is_armed:
+            self.get_logger().info("Motor system ARMED. Waiting 5 seconds before allowing motion...")
+            self.arm_time = time.monotonic()
+            self.is_armed = True
+        elif not msg.data and self.is_armed:
+            self.get_logger().info("Motor system DISARMED. Motors will remain stationary.")
+            self.is_armed = False
+            self.target_speeds = [0.0, 0.0, 0.0, 0.0]
+
     def command_cb(self, msg: Float64MultiArray):
+        """Processes incoming commands if the system is armed and past the wait period."""
         if len(msg.data) < 4:
             self.get_logger().error(f"Expected 4 velocities, got {len(msg.data)}")
             return
 
+        # Always update deadman timer so we don't trigger it immediately upon arming
         self.last_command_time = time.monotonic()
+        
         if self.deadman_active:
             self.get_logger().info("Deadman switch reset. Resuming motion.")
             self.deadman_active = False
+
+        # Drop commands if disarmed or still in the 5-second arming wait period
+        if not self.is_armed:
+            return
+        if (time.monotonic() - self.arm_time) < 5.0:
+            return
 
         # Clamp all inputs within hardware limits safely
         clipped = [max(-self.max_vel, min(self.max_vel, val)) for val in msg.data[:4]]
@@ -92,11 +117,15 @@ class MotorSystemNode(Node):
             if dt <= 0.0:
                 dt = self.control_period
 
-            # Trigger 1s deadman failsafe
-            if (now - self.last_command_time > self.deadman_timeout) and not self.deadman_active:
-                self.get_logger().warn("Deadman switch triggered! No command received for 1s. Stopping motors.")
+            # Enforce arming and the 5-second delay directly at the hardware control level
+            if not self.is_armed or (now - self.arm_time) < 5.0:
                 self.target_speeds = [0.0, 0.0, 0.0, 0.0]
-                self.deadman_active = True
+            else:
+                # Trigger 1s deadman failsafe (only evaluate when active & armed)
+                if (now - self.last_command_time > self.deadman_timeout) and not self.deadman_active:
+                    self.get_logger().warn("Deadman switch triggered! No command received for 1s. Stopping motors.")
+                    self.target_speeds = [0.0, 0.0, 0.0, 0.0]
+                    self.deadman_active = True
 
             # Ramps jerk-limited profile down to hardware controllers
             motor_lib.control_motors(self.target_speeds, dt)
@@ -142,6 +171,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
