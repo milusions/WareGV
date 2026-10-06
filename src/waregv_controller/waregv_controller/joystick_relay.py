@@ -53,7 +53,8 @@ class JoystickController(Node):
 
         # --- Arm/Disarm latching state ---
         self.is_armed = False
-        self.prev_button_0 = 0   # for edge detection (arm)
+        self.prev_button_0 = 0   # for edge detection (arm + light off)
+        self.prev_button_1 = 0   # for edge detection (light on)
         self.prev_button_3 = 0   # for edge detection (disarm)
 
         # --- Headlight blink timer ---
@@ -62,7 +63,7 @@ class JoystickController(Node):
         self.get_logger().info('JoystickController node has been initialized.')
 
     # ------------------------------------------------------------------ #
-    # Headlight helper                                                    #
+    # Headlight helpers                                                   #
     # ------------------------------------------------------------------ #
     def _publish_headlight(self, mode: str):
         msg = String()
@@ -70,23 +71,33 @@ class JoystickController(Node):
         self.headlight_pub_.publish(msg)
         self.get_logger().info(f'Headlight mode set to: {mode}')
 
+    def _cancel_headlight_timer(self):
+        if self.headlight_timer is not None:
+            self.headlight_timer.cancel()
+            self.destroy_timer(self.headlight_timer)
+            self.headlight_timer = None
+
     def _turn_off_headlight(self):
         self._publish_headlight("OFF")
-        if self.headlight_timer is not None:
-            self.headlight_timer.cancel()
-            self.destroy_timer(self.headlight_timer)
-            self.headlight_timer = None
+        self._cancel_headlight_timer()
 
-    def _start_arm_headlight_sequence(self):
-        """Blink headlight 2Hz for 5 seconds, then turn OFF."""
-        # Cancel any existing sequence
-        if self.headlight_timer is not None:
-            self.headlight_timer.cancel()
-            self.destroy_timer(self.headlight_timer)
-            self.headlight_timer = None
+    def _start_headlight_sequence(self, mode: str, duration: float):
+        """Blink headlight in `mode` for `duration` seconds, then turn OFF."""
+        self._cancel_headlight_timer()
+        self._publish_headlight(mode)
+        self.headlight_timer = self.create_timer(
+            duration, self._turn_off_headlight
+        )
 
-        self._publish_headlight("BLINK_2HZ")
-        self.headlight_timer = self.create_timer(5.0, self._turn_off_headlight)
+    def _handle_light_on(self):
+        """Button[1]: turn headlight ON (solid, no auto-off)."""
+        self._cancel_headlight_timer()
+        self._publish_headlight("ON")
+
+    def _handle_light_off(self):
+        """Button[0]: turn headlight OFF."""
+        self._cancel_headlight_timer()
+        self._publish_headlight("OFF")
 
     # ------------------------------------------------------------------ #
     # Arm / Disarm                                                        #
@@ -101,8 +112,8 @@ class JoystickController(Node):
         arm_msg.data = True
         self.arm_pub_.publish(arm_msg)
 
-        # Trigger headlight sequence
-        self._start_arm_headlight_sequence()
+        # Blink 2Hz for 5 seconds, then OFF
+        self._start_headlight_sequence("BLINK_2HZ", 5.0)
 
     def _handle_disarm(self):
         if not self.is_armed:
@@ -114,8 +125,8 @@ class JoystickController(Node):
         arm_msg.data = False
         self.arm_pub_.publish(arm_msg)
 
-        # Cancel any running headlight sequence and turn off
-        self._turn_off_headlight()
+        # Blink 2Hz for 2 seconds, then OFF
+        self._start_headlight_sequence("BLINK_2HZ", 2.0)
 
     # ------------------------------------------------------------------ #
     # Joy callback                                                        #
@@ -125,17 +136,24 @@ class JoystickController(Node):
         # --- Button edge detection (must have enough buttons) ---
         if len(msg.buttons) > 4:
             button_0 = msg.buttons[0]
+            button_1 = msg.buttons[1]
             button_3 = msg.buttons[3]
 
-            # Arm: rising edge on button[0]
+            # Arm + light OFF: rising edge on button[0]
             if button_0 == 1 and self.prev_button_0 == 0:
                 self._handle_arm()
+                self._handle_light_off()
+
+            # Light ON: rising edge on button[1]
+            if button_1 == 1 and self.prev_button_1 == 0:
+                self._handle_light_on()
 
             # Disarm: rising edge on button[3]
             if button_3 == 1 and self.prev_button_3 == 0:
                 self._handle_disarm()
 
             self.prev_button_0 = button_0
+            self.prev_button_1 = button_1
             self.prev_button_3 = button_3
 
         if len(msg.axes) < 2:
