@@ -1,6 +1,6 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 5.0
+    frequency: 30.0            # was 5.0
     sensor_timeout: 0.4
     two_d_mode: true
     publish_tf: true
@@ -11,12 +11,8 @@ ekf_filter_node:
     map_frame: map
     odom_frame: odom
     base_link_frame: base_footprint
-    world_frame: odom          # EKF publishes odom -> base_footprint (SLAM owns map -> odom)
+    world_frame: odom
 
-    # Config order: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
-
-    # Wheel twist (from wheel_odometry_node, ekf_mode:=true): forward speed + yaw rate.
-    # Its yaw-rate covariance is large (1e-2), so the gyro dominates heading.
     odom0: /wheel/odom
     odom0_config: [false, false, false,
                    false, false, false,
@@ -27,7 +23,6 @@ ekf_filter_node:
     odom0_differential: false
     odom0_relative: false
 
-    # Gyro yaw rate (bias-removed, scaled, zero while parked). Small covariance (4e-5).
     imu0: /imu/filtered
     imu0_config: [false, false, false,
                   false, false, false,
@@ -39,7 +34,6 @@ ekf_filter_node:
     imu0_relative: false
     imu0_remove_gravitational_acceleration: false
 
-    # Lower vyaw / yaw noise => smoother, trusts the model more. Raise if heading lags real turns.
     process_noise_covariance: [0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
       0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
       0.0, 0.0, 1e-06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,

@@ -38,11 +38,19 @@ def generate_launch_description():
         parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
         output="screen",
     )
+    
+    scan_smoother_node = Node(
+            package="waregv_hardware",
+            executable="scan_smoother",
+            parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+            output="screen",
+        )
 
     return LaunchDescription([
         use_sim_time_arg,  
         ydlidar_node,
         imu_chasis_relay_node,
         motor_system_node,
-    
+        scan_smoother_node,
+
     ])
