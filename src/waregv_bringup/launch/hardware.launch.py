@@ -242,7 +242,7 @@ def generate_launch_description():
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
-            waregv_suite,
+            # waregv_suite,
             waregv_vision,
             rosbridge_node,
             foxglove_bridge,

@@ -204,17 +204,7 @@ class JoystickController(Node):
         if len(msg.axes) < 2:
             return
 
-        if not self.use_sim_time:
-            enable_button_pressed = msg.buttons[4] == 1
-
-            if not enable_button_pressed:
-                if self.send_stop == False:
-                    cmd_msg = Twist()
-                    self.cmd_pub_.publish(cmd_msg)
-                    self.send_stop = True
-                return
-            else:
-                self.send_stop = False
+       
 
         max_lin = self.get_parameter('max_linear_vel').value
         max_ang = self.get_parameter('max_angular_vel').value
