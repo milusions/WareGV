@@ -203,31 +203,32 @@ class ArduinoNavBridge(Node):
             self.current_title = "GOAL ACCEPTED"
             self.current_subtitle = "Preparing route..."
             self.current_action = "spinner"
-            self.start_nav_light()          # PULSE_3 warn light
-            self.start_headlight_sequence()
+            self.start_nav_light()          # BLINK_2HZ warn light
+            self.start_nav_headlight()      # PULSE_3 headlight
             media_file = "preparing.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_EXECUTING:
             self.current_title = "NAVIGATING"
             self.current_subtitle = "En route to destination"
             self.current_action = "loader"
-            self.start_nav_light()          # keep PULSE_3 while driving
+            self.start_nav_light()          # keep BLINK_2HZ while driving
+            self.start_nav_headlight()      # keep PULSE_3 headlight while driving
             media_file = "navigating.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_SUCCEEDED:
             self.current_title = "ARRIVED"
             self.current_subtitle = "Destination reached"
             self.current_action = "none"
-            self.turn_off_warn_light()      # <-- stop PULSE_3 on arrival
-            self.turn_off_headlight()
+            self.turn_off_warn_light()      # stop BLINK_2HZ on arrival
+            self.turn_off_headlight()       # stop PULSE_3 on arrival
             media_file = "arrived.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_ABORTED:
             self.current_title = "NAV ABORTED"
             self.current_subtitle = "Navigation failed"
             self.current_action = "none"
-            self.turn_off_warn_light()      # stop PULSE_3 first
-            self.trigger_error_light()      # then blink for 15s
+            self.turn_off_warn_light()      # stop BLINK_2HZ first
+            self.trigger_error_light()      # then blink 5 Hz for 15s
             self.turn_off_headlight()
             media_file = "nav_aborted.mp4"
 
@@ -235,8 +236,8 @@ class ArduinoNavBridge(Node):
             self.current_title = "NAV CANCELED"
             self.current_subtitle = "Navigation stopped"
             self.current_action = "none"
-            self.turn_off_warn_light()      # stop PULSE_3 first
-            self.trigger_error_light()      # then blink for 15s
+            self.turn_off_warn_light()      # stop BLINK_2HZ first
+            self.trigger_error_light()      # then blink 5 Hz for 15s
             self.turn_off_headlight()
             media_file = "nav_canceled.mp4"
 
@@ -248,12 +249,12 @@ class ArduinoNavBridge(Node):
     # Warn light helpers                                                  #
     # ------------------------------------------------------------------ #
     def start_nav_light(self):
-        """Solid PULSE_3 warn light while navigating."""
+        """Blink 2 Hz warn light while navigating."""
         if self.warn_light_timer:
             self.warn_light_timer.cancel()
             self.destroy_timer(self.warn_light_timer)
             self.warn_light_timer = None
-        self.current_warn_light = "PULSE_3"
+        self.current_warn_light = "BLINK_2HZ"
 
     def trigger_error_light(self):
         """Blink for 15s, then auto-off."""
@@ -275,9 +276,10 @@ class ArduinoNavBridge(Node):
         self.send_current_state()
 
     # ------------------------------------------------------------------ #
-    # Headlight Sequences                                                 #
+    # Headlight helpers                                                   #
     # ------------------------------------------------------------------ #
-    def start_headlight_sequence(self):
+    def start_nav_headlight(self):
+        """Solid PULSE_3 headlight while navigating."""
         if self.hl_timer_1:
             self.hl_timer_1.cancel()
             self.destroy_timer(self.hl_timer_1)
@@ -286,30 +288,7 @@ class ArduinoNavBridge(Node):
             self.hl_timer_2.cancel()
             self.destroy_timer(self.hl_timer_2)
             self.hl_timer_2 = None
-
         self.current_headlight_mode = "PULSE_3"
-        self.send_current_state()
-        # Pulse for 3 seconds, then switch to ON
-        self.hl_timer_1 = self.create_timer(3.0, self.headlight_seq_step2)
-
-    def headlight_seq_step2(self):
-        if self.hl_timer_1:
-            self.hl_timer_1.cancel()
-            self.destroy_timer(self.hl_timer_1)
-            self.hl_timer_1 = None
-
-        self.current_headlight_mode = "ON"
-        self.send_current_state()
-        # Stay ON for 5 seconds, then turn OFF
-        self.hl_timer_2 = self.create_timer(5.0, self.headlight_seq_step3)
-
-    def headlight_seq_step3(self):
-        if self.hl_timer_2:
-            self.hl_timer_2.cancel()
-            self.destroy_timer(self.hl_timer_2)
-            self.hl_timer_2 = None
-
-        self.current_headlight_mode = "OFF"
         self.send_current_state()
 
     def turn_off_headlight(self):

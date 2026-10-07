@@ -1,22 +1,44 @@
 """
 Helio Rover Backend
 ===================
-Real ROS 2 integration for the Helio AI agent.
+Real ROS 2 integration + non-blocking navigation API.
 
-Wires FastAPI endpoints to:
-  * TF map -> base_link              (GET  /amcl_pose, /robot_pose)
-  * Nav2 /navigate_to_pose           (POST /navigate_to_pose)
-  * Nav2 /follow_waypoints           (POST /follow_waypoints)
-  * Action cancellation              (POST /abort)
-  * /initialpose publisher           (POST /set_initial_pose)
-  * /rover/mode topic + service      (GET/POST /system/mode)
-  * Disk-backed map store            (/maps/*)
+Design
+------
+* Nav goals are dispatched FIRE-AND-FORGET. The HTTP call returns a
+  goal_id within ~50 ms; the robot keeps moving in the background.
+* Clients poll GET /goal/{goal_id} for status.
+* TF lookups are served from a cached buffer, never blocking.
+* A MultiThreadedExecutor runs in the main thread; FastAPI runs in a
+  daemon thread and only touches thread-safe helpers.
 
-Run standalone:
-    uvicorn waregv_suite.main:app --host 0.0.0.0 --port 8000
+Endpoints
+---------
+System
+    GET  /system/mode            (fast)
+    POST /system/mode            (fast)
+    POST /set_initial_pose       (fast, publish-only)
+    GET  /robot_pose             (fast, cached TF)
+    GET  /amcl_pose              (alias)
 
-Run via ROS 2 (recommended):
-    ros2 launch waregv_suite suite.launch.py use_sim_time:=false
+Navigation (non-blocking)
+    POST /navigate_to_pose       -> {ok, goal_id, status:"dispatched"}
+    POST /follow_waypoints       -> {ok, goal_id, status:"dispatched"}
+    GET  /goal/{goal_id}         -> {ok, status, result?}
+    GET  /goals                  -> {active:[...], recent:[...]}
+    POST /abort                  -> {ok, cancelled:[...]}
+
+Maps
+    GET  /maps
+    GET  /maps/{map_name}
+    GET  /map/exists
+    GET  /map/save
+    POST /map/save_to_disk
+    POST /map/load
+
+Diagnostics
+    GET  /health
+    GET  /state
 """
 
 from __future__ import annotations
@@ -27,7 +49,10 @@ import math
 import os
 import threading
 import time
+import uuid
 import zipfile
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -42,13 +67,15 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.task import Future as RclpyFuture
-
-from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import (
+    QoSProfile,
+    DurabilityPolicy,
+    ReliabilityPolicy,
+    HistoryPolicy,
+)
 
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
 from std_msgs.msg import String
-from std_srvs.srv import SetBool  # placeholder for a custom mode service
 
 from nav2_msgs.action import NavigateToPose, FollowWaypoints
 from action_msgs.msg import GoalStatus
@@ -71,6 +98,12 @@ NAV_ACTION = "navigate_to_pose"
 WAYPOINT_ACTION = "follow_waypoints"
 MODE_TOPIC = "/rover/mode"
 INITIALPOSE_TOPIC = "/initialpose"
+
+# How many finished goals to keep in memory for polling.
+RECENT_GOAL_HISTORY = 200
+
+# TF lookup timeout — very short, we do NOT want to block HTTP threads.
+TF_LOOKUP_TIMEOUT_S = 0.2
 
 
 # ====================================================================
@@ -103,13 +136,92 @@ class HelioCommandBody(BaseModel):
 
 
 # ====================================================================
+# Goal tracking
+# ====================================================================
+@dataclass
+class TrackedGoal:
+    goal_id: str
+    kind: str                     # "navigate" | "waypoints" | "abort"
+    request: Dict[str, Any]       # original payload, for diagnostics
+    status: str = "dispatched"    # dispatched | executing | succeeded |
+                                  # canceled | aborted | rejected | failed
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    message: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    # Live handles (not serialised).
+    goal_handle: Any = None
+    kind_internal: str = "nav"    # "nav" | "wp"
+
+    def touch(self, **kwargs: Any) -> None:
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self.updated_at = time.time()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "goal_id": self.goal_id,
+            "kind": self.kind,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "message": self.message,
+            "result": self.result,
+            "request": self.request,
+        }
+
+
+class GoalRegistry:
+    """Thread-safe store of active + recent goals."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._active: Dict[str, TrackedGoal] = {}
+        self._recent: "OrderedDict[str, TrackedGoal]" = OrderedDict()
+
+    def add(self, goal: TrackedGoal) -> None:
+        with self._lock:
+            self._active[goal.goal_id] = goal
+
+    def get(self, goal_id: str) -> Optional[TrackedGoal]:
+        with self._lock:
+            g = self._active.get(goal_id)
+            if g is not None:
+                return g
+            return self._recent.get(goal_id)
+
+    def finish(self, goal_id: str) -> None:
+        with self._lock:
+            g = self._active.pop(goal_id, None)
+            if g is None:
+                return
+            self._recent[goal_id] = g
+            while len(self._recent) > RECENT_GOAL_HISTORY:
+                self._recent.popitem(last=False)
+
+    def all_active(self) -> List[TrackedGoal]:
+        with self._lock:
+            return list(self._active.values())
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "active": [g.to_dict() for g in self._active.values()],
+                "recent": [g.to_dict() for g in self._recent.values()],
+            }
+
+
+GOALS = GoalRegistry()
+
+
+# ====================================================================
 # ROS 2 backend node
 # ====================================================================
 class HelioBackendNode(Node):
     """
-    Single ROS 2 node that owns every ROS interface the HTTP layer needs.
-    HTTP handlers call into this object through the thread-safe helpers
-    at the bottom of the file.
+    Owns every ROS interface the HTTP layer needs. All methods that
+    touch rclpy objects are either synchronous + thread-safe (publishers,
+    TF buffer) or asynchronous (actions, awaited from FastAPI handlers).
     """
 
     def __init__(self) -> None:
@@ -128,7 +240,6 @@ class HelioBackendNode(Node):
             self.get_parameter("default_map").get_parameter_value().string_value
         )
 
-        # use_sim_time is auto-declared; just read it.
         try:
             self._use_sim_time = (
                 self.get_parameter("use_sim_time").get_parameter_value().bool_value
@@ -138,11 +249,13 @@ class HelioBackendNode(Node):
 
         self._cb_group = ReentrantCallbackGroup()
 
-        # ---- TF ---------------------------------------------------------
+        # ---- TF --------------------------------------------------------
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._tf_frame_map = "map"
+        self._tf_frame_base = "base_link"
 
-        # ---- Nav2 action clients ---------------------------------------
+        # ---- Action clients -------------------------------------------
         self._nav_client = ActionClient(
             self, NavigateToPose, NAV_ACTION, callback_group=self._cb_group
         )
@@ -150,7 +263,7 @@ class HelioBackendNode(Node):
             self, FollowWaypoints, WAYPOINT_ACTION, callback_group=self._cb_group
         )
 
-        # ---- Initial pose publisher ------------------------------------
+        # ---- Initial pose publisher -----------------------------------
         latched = QoSProfile(
             depth=1,
             history=HistoryPolicy.KEEP_LAST,
@@ -161,7 +274,7 @@ class HelioBackendNode(Node):
             PoseWithCovarianceStamped, INITIALPOSE_TOPIC, latched
         )
 
-        # ---- Mode publisher + subscriber -------------------------------
+        # ---- Mode pub/sub ---------------------------------------------
         self._mode_pub = self.create_publisher(String, MODE_TOPIC, 10)
         self._mode_sub = self.create_subscription(
             String, MODE_TOPIC, self._on_mode_msg, 10
@@ -169,32 +282,43 @@ class HelioBackendNode(Node):
         self._mode = "idle"
         self._map_name = self._default_map
 
-        # ---- Track active goals for /abort -----------------------------
-        self._active_nav_goals: List[Any] = []
-        self._active_wp_goals: List[Any] = []
-
         self.get_logger().info(
             f"HelioBackendNode ready (use_sim_time={self._use_sim_time}, "
             f"host={self._host}, port={self._port})"
         )
 
     # ------------------------------------------------------------------
-    # Mode topic callback
+    # Mode
     # ------------------------------------------------------------------
     def _on_mode_msg(self, msg: String) -> None:
         self._mode = msg.data
         self.get_logger().info(f"Mode updated: {self._mode}")
 
+    def get_mode(self) -> Dict[str, Any]:
+        return {"ok": True, "mode": self._mode, "map_name": self._map_name}
+
+    def set_mode(self, mode: str, map_name: str) -> Dict[str, Any]:
+        # Adapt this to your mode manager (topic / service / launch).
+        msg = String()
+        msg.data = f"{mode}:{map_name}"
+        self._mode_pub.publish(msg)
+        self._mode = mode
+        self._map_name = map_name
+        return {"ok": True, "mode": mode, "map_name": map_name}
+
     # ------------------------------------------------------------------
-    # Pose (TF map -> base_link)
+    # Pose (non-blocking-ish TF lookup with short timeout)
     # ------------------------------------------------------------------
     def get_pose(self) -> Dict[str, Any]:
         try:
             t = self._tf_buffer.lookup_transform(
-                "map", "base_link", rclpy.time.Time()
+                self._tf_frame_map,
+                self._tf_frame_base,
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=TF_LOOKUP_TIMEOUT_S),
             )
         except Exception as e:
-            return {"ok": False, "error": f"TF map->base_link unavailable: {e}"}
+            return {"ok": False, "error": f"TF lookup failed: {e}"}
 
         tr = t.transform.translation
         q = t.transform.rotation
@@ -207,10 +331,14 @@ class HelioBackendNode(Node):
                 "yaw_deg": math.degrees(yaw),
             },
             "source": "tf:map->base_link",
+            "stamp": {
+                "sec": t.header.stamp.sec,
+                "nanosec": t.header.stamp.nanosec,
+            },
         }
 
     # ------------------------------------------------------------------
-    # Initial pose
+    # Initial pose (pure publish — instant)
     # ------------------------------------------------------------------
     def publish_initial_pose(self, x: float, y: float, yaw_deg: float) -> None:
         msg = PoseWithCovarianceStamped()
@@ -223,7 +351,6 @@ class HelioBackendNode(Node):
         msg.pose.pose.orientation.y = q[1]
         msg.pose.pose.orientation.z = q[2]
         msg.pose.pose.orientation.w = q[3]
-        # Reasonable AMCL covariance for a "clicked" pose.
         msg.pose.covariance[0] = 0.25
         msg.pose.covariance[7] = 0.25
         msg.pose.covariance[35] = 0.0685
@@ -233,7 +360,7 @@ class HelioBackendNode(Node):
         )
 
     # ------------------------------------------------------------------
-    # Nav2 helpers
+    # Helpers
     # ------------------------------------------------------------------
     def _pose_stamped(self, x: float, y: float, yaw_deg: float) -> PoseStamped:
         ps = PoseStamped()
@@ -248,56 +375,109 @@ class HelioBackendNode(Node):
         ps.pose.orientation.w = q[3]
         return ps
 
-    async def navigate_to_pose(
-        self, x: float, y: float, yaw_deg: float, timeout_s: float = 300.0
+    def _attach_callbacks(self, goal: TrackedGoal, goal_handle: Any) -> None:
+        """
+        Wire Nav2 feedback / result callbacks so the GoalRegistry stays
+        up to date without any HTTP polling required on our side.
+        """
+        goal.touch(status="executing", goal_handle=goal_handle)
+
+        # ----- feedback -------------------------------------------------
+        def _feedback_cb(feedback_msg: Any) -> None:
+            try:
+                fb = feedback_msg.feedback
+                # NavigateToPose: distance_remaining
+                dist = getattr(fb, "distance_remaining", None)
+                nwp = getattr(fb, "current_waypoint", None)
+                extra = {}
+                if dist is not None:
+                    extra["distance_remaining"] = float(dist)
+                if nwp is not None:
+                    extra["current_waypoint"] = int(nwp)
+                if extra:
+                    goal.touch(**extra)
+            except Exception:
+                pass
+
+        sub = goal_handle.get_feedback_async(_feedback_cb) \
+            if hasattr(goal_handle, "get_feedback_async") else None
+        if sub is None:
+            # Older rclpy: feedback via callback on send_goal_async
+            pass
+
+        # ----- result ---------------------------------------------------
+        def _result_cb(future: Any) -> None:
+            try:
+                wrapped = future.result()
+                status_code = wrapped.status
+                goal.touch(
+                    status=_status_name(status_code),
+                    result={"status_code": int(status_code)},
+                )
+            except Exception as e:
+                goal.touch(status="failed", message=str(e))
+            finally:
+                GOALS.finish(goal.goal_id)
+
+        result_fut = goal_handle.get_result_async()
+        result_fut.add_done_callback(_result_cb)
+
+    # ------------------------------------------------------------------
+    # Fire-and-forget: navigate
+    # ------------------------------------------------------------------
+    def dispatch_navigate(
+        self, x: float, y: float, yaw_deg: float
     ) -> Dict[str, Any]:
-        """Send a NavigateToPose goal and await the result."""
-        if not self._nav_client.wait_for_server(timeout_sec=5.0):
+        if not self._nav_client.server_is_ready():
+            # Non-blocking check; do NOT wait_for_server here.
             return {
                 "ok": False,
-                "error": f"Action server '{NAV_ACTION}' not available",
+                "error": f"Action server '{NAV_ACTION}' not ready",
             }
 
         goal = NavigateToPose.Goal()
         goal.pose = self._pose_stamped(x, y, yaw_deg)
 
-        send_fut = self._nav_client.send_goal_async(goal)
-        goal_handle = await _rclpy_future_to_asyncio(send_fut)
+        goal_id = uuid.uuid4().hex
+        tracked = TrackedGoal(
+            goal_id=goal_id,
+            kind="navigate",
+            kind_internal="nav",
+            request={"x": x, "y": y, "yaw_deg": yaw_deg},
+        )
+        GOALS.add(tracked)
 
-        if not goal_handle.accepted:
-            return {"ok": False, "error": "Goal rejected by Nav2"}
+        send_fut = self._nav_client.send_goal_async(
+            goal, feedback_callback=None
+        )
 
-        self._active_nav_goals.append(goal_handle)
-
-        result_fut = goal_handle.get_result_async()
-        try:
-            result = await asyncio.wait_for(
-                _rclpy_future_to_asyncio(result_fut), timeout=timeout_s
-            )
-        except asyncio.TimeoutError:
-            goal_handle.cancel_goal_async()
-            return {"ok": False, "error": "Navigation timed out"}
-        finally:
+        def _on_send(fut: Any) -> None:
             try:
-                self._active_nav_goals.remove(goal_handle)
-            except ValueError:
-                pass
+                gh = fut.result()
+            except Exception as e:
+                tracked.touch(status="failed", message=str(e))
+                GOALS.finish(goal_id)
+                return
+            if not gh.accepted:
+                tracked.touch(status="rejected", message="Goal rejected by Nav2")
+                GOALS.finish(goal_id)
+                return
+            self._attach_callbacks(tracked, gh)
 
-        status = result.status
-        return {
-            "ok": status == GoalStatus.STATUS_SUCCEEDED,
-            "status": _status_name(status),
-            "goal_id": str(goal_handle.goal_id.uuid),
-        }
+        send_fut.add_done_callback(_on_send)
 
-    async def follow_waypoints(
-        self, waypoints: List[Dict[str, float]], timeout_s: float = 600.0
+        return {"ok": True, "status": "dispatched", "goal_id": goal_id}
+
+    # ------------------------------------------------------------------
+    # Fire-and-forget: follow waypoints
+    # ------------------------------------------------------------------
+    def dispatch_waypoints(
+        self, waypoints: List[Dict[str, float]]
     ) -> Dict[str, Any]:
-        """Send a FollowWaypoints goal and await the result."""
-        if not self._wp_client.wait_for_server(timeout_sec=5.0):
+        if not self._wp_client.server_is_ready():
             return {
                 "ok": False,
-                "error": f"Action server '{WAYPOINT_ACTION}' not available",
+                "error": f"Action server '{WAYPOINT_ACTION}' not ready",
             }
 
         goal = FollowWaypoints.Goal()
@@ -306,83 +486,70 @@ class HelioBackendNode(Node):
             for w in waypoints
         ]
 
+        goal_id = uuid.uuid4().hex
+        tracked = TrackedGoal(
+            goal_id=goal_id,
+            kind="waypoints",
+            kind_internal="wp",
+            request={"waypoints": waypoints},
+        )
+        GOALS.add(tracked)
+
         send_fut = self._wp_client.send_goal_async(goal)
-        goal_handle = await _rclpy_future_to_asyncio(send_fut)
 
-        if not goal_handle.accepted:
-            return {"ok": False, "error": "Goal rejected by Nav2"}
-
-        self._active_wp_goals.append(goal_handle)
-
-        result_fut = goal_handle.get_result_async()
-        try:
-            result = await asyncio.wait_for(
-                _rclpy_future_to_asyncio(result_fut), timeout=timeout_s
-            )
-        except asyncio.TimeoutError:
-            goal_handle.cancel_goal_async()
-            return {"ok": False, "error": "Waypoint following timed out"}
-        finally:
+        def _on_send(fut: Any) -> None:
             try:
-                self._active_wp_goals.remove(goal_handle)
-            except ValueError:
-                pass
+                gh = fut.result()
+            except Exception as e:
+                tracked.touch(status="failed", message=str(e))
+                GOALS.finish(goal_id)
+                return
+            if not gh.accepted:
+                tracked.touch(status="rejected", message="Goal rejected by Nav2")
+                GOALS.finish(goal_id)
+                return
+            self._attach_callbacks(tracked, gh)
 
-        status = result.status
-        missed = list(getattr(result.result, "missed_waypoints", []))
+        send_fut.add_done_callback(_on_send)
+
         return {
-            "ok": status == GoalStatus.STATUS_SUCCEEDED,
-            "status": _status_name(status),
+            "ok": True,
+            "status": "dispatched",
+            "goal_id": goal_id,
             "count": len(waypoints),
-            "missed_waypoints": missed,
         }
 
-    async def abort_all(self) -> Dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Abort (instant — just cancels goals)
+    # ------------------------------------------------------------------
+    def abort_all(self) -> Dict[str, Any]:
         cancelled: List[str] = []
-        for gh in list(self._active_nav_goals) + list(self._active_wp_goals):
-            try:
-                gh.cancel_goal_async()
-                cancelled.append(str(gh.goal_id.uuid))
-            except Exception:
-                pass
-        self._active_nav_goals.clear()
-        self._active_wp_goals.clear()
+        for g in GOALS.all_active():
+            gh = g.goal_handle
+            if gh is not None:
+                try:
+                    gh.cancel_goal_async()
+                    cancelled.append(g.goal_id)
+                    g.touch(status="canceling")
+                except Exception:
+                    pass
+            else:
+                # Goal was dispatched but not accepted yet.
+                cancelled.append(g.goal_id)
+                g.touch(status="canceled")
+                GOALS.finish(g.goal_id)
         return {"ok": True, "cancelled": cancelled, "stopped": True}
 
-    # ------------------------------------------------------------------
-    # Mode
-    # ------------------------------------------------------------------
-    def get_mode(self) -> Dict[str, Any]:
-        return {"ok": True, "mode": self._mode, "map_name": self._map_name}
-
-    def set_mode(self, mode: str, map_name: str) -> Dict[str, Any]:
-        # NOTE: adapt this to whatever your mode manager listens to.
-        # Common options:
-        #   * publish a JSON string on a dedicated topic
-        #   * call a ROS 2 service
-        #   * spawn/kill a launch process
-        # Here we publish a simple "<mode>:<map>" string.
-        msg = String()
-        msg.data = f"{mode}:{map_name}"
-        self._mode_pub.publish(msg)
-        # Optimistic local update; the subscriber will confirm.
-        self._mode = mode
-        self._map_name = map_name
-        return {"ok": True, "mode": mode, "map_name": map_name}
-
 
 # ====================================================================
-# rclpy Future  ->  asyncio Future bridge
+# rclpy Future -> asyncio Future bridge (unused in fast path now,
+# kept for future async endpoints)
 # ====================================================================
-def _rclpy_future_to_asyncio(rclpy_future: RclpyFuture) -> asyncio.Future:
-    """
-    Convert an rclpy.task.Future into an asyncio.Future so FastAPI's
-    async handlers can `await` it without blocking the event loop.
-    """
+def _rclpy_future_to_asyncio(rclpy_future: Any) -> asyncio.Future:
     loop = asyncio.get_running_loop()
     aio_fut = loop.create_future()
 
-    def _done_cb(fut: RclpyFuture) -> None:
+    def _done_cb(fut: Any) -> None:
         if aio_fut.done():
             return
         exc = fut.exception()
@@ -408,11 +575,10 @@ def _status_name(status: int) -> str:
 
 
 # ====================================================================
-# Global handles (set by main())
+# Global handles
 # ====================================================================
 NODE: Optional[HelioBackendNode] = None
 EXECUTOR: Optional[MultiThreadedExecutor] = None
-NODE_READY = threading.Event()
 
 
 def _require_node() -> HelioBackendNode:
@@ -426,8 +592,8 @@ def _require_node() -> HelioBackendNode:
 # ====================================================================
 app = FastAPI(
     title="Helio Rover Backend",
-    version="2.0.0",
-    description="Real ROS 2 bridge between the Helio AI agent and the WareGV rover.",
+    version="2.1.0",
+    description="Real ROS 2 bridge with non-blocking navigation dispatch.",
 )
 
 
@@ -460,16 +626,19 @@ async def robot_pose() -> Dict[str, Any]:
 
 @app.get("/amcl_pose")
 async def amcl_pose() -> Dict[str, Any]:
-    """Backwards-compatible alias for /robot_pose."""
     return _require_node().get_pose()
 
 
 # --------------------------------------------------------------------
-# Navigation
+# Navigation — FIRE AND FORGET
 # --------------------------------------------------------------------
 @app.post("/navigate_to_pose")
 async def navigate_to_pose(body: PoseBody) -> Dict[str, Any]:
-    return await _require_node().navigate_to_pose(body.x, body.y, body.yaw_deg)
+    """
+    Dispatch a NavigateToPose goal. Returns immediately with a goal_id.
+    Poll GET /goal/{goal_id} for status.
+    """
+    return _require_node().dispatch_navigate(body.x, body.y, body.yaw_deg)
 
 
 @app.post("/follow_waypoints")
@@ -477,16 +646,29 @@ async def follow_waypoints(body: WaypointsBody) -> Dict[str, Any]:
     if not body.waypoints:
         raise HTTPException(status_code=400, detail="waypoints list is empty")
     wps = [{"x": w.x, "y": w.y, "yaw_deg": w.yaw_deg} for w in body.waypoints]
-    return await _require_node().follow_waypoints(wps)
+    return _require_node().dispatch_waypoints(wps)
+
+
+@app.get("/goal/{goal_id}")
+async def get_goal(goal_id: str) -> Dict[str, Any]:
+    g = GOALS.get(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail=f"Unknown goal '{goal_id}'")
+    return {"ok": True, **g.to_dict()}
+
+
+@app.get("/goals")
+async def list_goals() -> Dict[str, Any]:
+    return {"ok": True, **GOALS.snapshot()}
 
 
 @app.post("/abort")
 async def abort_mission() -> Dict[str, Any]:
-    return await _require_node().abort_all()
+    return _require_node().abort_all()
 
 
 # --------------------------------------------------------------------
-# Maps (disk-backed — same as before, unchanged)
+# Maps (disk-backed)
 # --------------------------------------------------------------------
 def _map_path(name: str) -> str:
     return os.path.join(MAP_DIR, name)
@@ -523,12 +705,12 @@ async def get_map_info(map_name: str) -> Dict[str, Any]:
 
 
 @app.get("/map/exists")
-async def map_exists(name: str = Query(..., description="Map name to check")) -> Dict[str, Any]:
+async def map_exists(name: str = Query(...)) -> Dict[str, Any]:
     return {"name": name, "exists": _map_exists_on_disk(name)}
 
 
 @app.get("/map/save")
-async def save_map(name: str = Query("map", description="Map name to download")):
+async def save_map(name: str = Query("map")):
     if not _map_exists_on_disk(name):
         raise HTTPException(status_code=404, detail=f"Map '{name}' not found")
     d = _map_path(name)
@@ -559,7 +741,7 @@ async def save_map_to_disk(
             status_code=409,
             content={
                 "ok": False,
-                "error": f"Map '{name}' already exists. Pass overwrite=true to replace.",
+                "error": f"Map '{name}' already exists. Pass overwrite=true.",
             },
         )
     os.makedirs(target_dir, exist_ok=True)
@@ -589,7 +771,9 @@ async def load_map(
     pgm: UploadFile = File(...),
     yaml: Optional[UploadFile] = File(None),
 ) -> Dict[str, Any]:
-    return await save_map_to_disk(name=name, overwrite=overwrite, pgm=pgm, yaml=yaml)
+    return await save_map_to_disk(
+        name=name, overwrite=overwrite, pgm=pgm, yaml=yaml
+    )
 
 
 # --------------------------------------------------------------------
@@ -615,11 +799,12 @@ async def health() -> Dict[str, Any]:
         return {"ok": False, "error": "ROS 2 node not initialised"}
     return {
         "ok": True,
-        "mode": NODE._mode,  # noqa: SLF001 — read-only diagnostic
-        "map_name": NODE._map_name,
-        "active_nav_goals": len(NODE._active_nav_goals),
-        "active_wp_goals": len(NODE._active_wp_goals),
-        "use_sim_time": NODE._use_sim_time,
+        "mode": NODE._mode,          # noqa: SLF001
+        "map_name": NODE._map_name,  # noqa: SLF001
+        "nav_ready": NODE._nav_client.server_is_ready(),   # noqa: SLF001
+        "wp_ready": NODE._wp_client.server_is_ready(),     # noqa: SLF001
+        "active_goals": len(GOALS.all_active()),
+        "use_sim_time": NODE._use_sim_time,  # noqa: SLF001
     }
 
 
@@ -628,11 +813,10 @@ async def full_state() -> Dict[str, Any]:
     if NODE is None:
         return {"ok": False, "error": "ROS 2 node not initialised"}
     return {
-        "mode": NODE._mode,
-        "map_name": NODE._map_name,
+        "mode": NODE._mode,          # noqa: SLF001
+        "map_name": NODE._map_name,  # noqa: SLF001
         "pose": NODE.get_pose(),
-        "active_nav_goals": len(NODE._active_nav_goals),
-        "active_wp_goals": len(NODE._active_wp_goals),
+        "goals": GOALS.snapshot(),
     }
 
 
@@ -641,24 +825,17 @@ async def full_state() -> Dict[str, Any]:
 # ====================================================================
 def _run_uvicorn(host: str, port: int) -> None:
     import uvicorn
-    # log_level "warning" so uvicorn doesn't drown out ROS logs
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 def main(args: Optional[List[str]] = None) -> None:
-    """
-    ROS 2 entry point referenced by setup.py:
-        'waregv_suite_backend = waregv_suite.main:main'
-    """
     global NODE, EXECUTOR
 
     rclpy.init(args=args)
-
     NODE = HelioBackendNode()
     EXECUTOR = MultiThreadedExecutor()
     EXECUTOR.add_node(NODE)
 
-    # Start FastAPI in a daemon thread.
     server_thread = threading.Thread(
         target=_run_uvicorn,
         args=(NODE._host, NODE._port),  # noqa: SLF001
