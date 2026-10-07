@@ -7,6 +7,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     GroupAction,
     IncludeLaunchDescription,
+    TimerAction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.launch_description_sources.frontend_launch_description_source import (
@@ -55,7 +56,7 @@ def generate_launch_description():
     }
 
     # =========================================================
-    # Nodes and Includes
+    # Immediate Nodes and Includes
     # =========================================================
     waregv_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -120,17 +121,6 @@ def generate_launch_description():
             "wheel_radius": wheel_radius_conf,
             "track_width": track_width_conf,
         }.items(),
-    )
-
-    waregv_mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory("waregv_mapping"),
-                "launch",
-                "mapping.launch.py",
-            )
-        ),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
     waregv_suite = IncludeLaunchDescription(
@@ -198,19 +188,46 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
-    waregv_navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory("waregv_navigation"),
-                "launch",
-                "navigation.launch.py",
+    # =========================================================
+    # Delayed Mapping Node (Waits 30 seconds for complete system stability)
+    # =========================================================
+    delayed_mapping = TimerAction(
+        period=30.0,
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory("waregv_mapping"),
+                        "launch",
+                        "mapping.launch.py",
+                    )
+                ),
+                launch_arguments={"use_sim_time": use_sim_time}.items(),
             )
-        ),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "max_linear_velocity": max_linear_velocity_conf,
-            "max_angular_velocity": max_angular_velocity_conf,
-        }.items(),
+        ]
+    )
+
+    # =========================================================
+    # Delayed Navigation Node (Waits 35 seconds to boot after map exists)
+    # =========================================================
+    delayed_navigation = TimerAction(
+        period=35.0,
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory("waregv_navigation"),
+                        "launch",
+                        "navigation.launch.py",
+                    )
+                ),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "max_linear_velocity": max_linear_velocity_conf,
+                    "max_angular_velocity": max_angular_velocity_conf,
+                }.items(),
+            )
+        ]
     )
 
     return LaunchDescription(
@@ -225,12 +242,12 @@ def generate_launch_description():
             twist_mux_node,
             waregv_odometry,
             waregv_controller,
-            waregv_mapping,
             waregv_suite,
             waregv_vision,
             rosbridge_node,
             foxglove_bridge,
             waregv_user_interfaces,
-            waregv_navigation,
+            delayed_mapping,
+            delayed_navigation,
         ]
     )
