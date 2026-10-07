@@ -40,6 +40,10 @@ class ArduinoNavBridge(Node):
         self.current_warn_light = "OFF"
         self.current_headlight_mode = "OFF"
         self.warn_light_timer = None
+        
+        # Headlight autonomous sequence timers
+        self.hl_timer_1 = None
+        self.hl_timer_2 = None
 
         # Startup light sequence -- flag MUST be True before subscriptions spin
         self.startup_light_timer = None
@@ -187,6 +191,7 @@ class ArduinoNavBridge(Node):
             self.current_subtitle = "Preparing route..."
             self.current_action = "spinner"
             self.start_nav_light()
+            self.start_headlight_sequence()
             media_file = "preparing.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_EXECUTING:
@@ -201,6 +206,7 @@ class ArduinoNavBridge(Node):
             self.current_subtitle = "Destination reached"
             self.current_action = "none"
             self.turn_off_warn_light()
+            self.turn_off_headlight()
             media_file = "arrived.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_ABORTED:
@@ -208,6 +214,7 @@ class ArduinoNavBridge(Node):
             self.current_subtitle = "Navigation failed"
             self.current_action = "none"
             self.trigger_error_light()
+            self.turn_off_headlight()
             media_file = "nav_aborted.mp4"
 
         elif self.current_goal_status == GoalStatus.STATUS_CANCELED:
@@ -215,6 +222,7 @@ class ArduinoNavBridge(Node):
             self.current_subtitle = "Navigation stopped"
             self.current_action = "none"
             self.trigger_error_light()
+            self.turn_off_headlight()
             media_file = "nav_canceled.mp4"
 
         self.send_current_state()
@@ -239,6 +247,49 @@ class ArduinoNavBridge(Node):
         if self.warn_light_timer:
             self.warn_light_timer.cancel()
             self.warn_light_timer = None
+
+    # ------------------------------------------------------------------ #
+    # Headlight Sequences                                                #
+    # ------------------------------------------------------------------ #
+    def start_headlight_sequence(self):
+        if self.hl_timer_1:
+            self.hl_timer_1.cancel()
+        if self.hl_timer_2:
+            self.hl_timer_2.cancel()
+
+        self.current_headlight_mode = "PULSE_3"
+        self.send_current_state()
+        # Pulse for 3 seconds, then switch to ON
+        self.hl_timer_1 = self.create_timer(3.0, self.headlight_seq_step2)
+
+    def headlight_seq_step2(self):
+        if self.hl_timer_1:
+            self.hl_timer_1.cancel()
+            self.hl_timer_1 = None
+
+        self.current_headlight_mode = "ON"
+        self.send_current_state()
+        # Stay ON for 5 seconds, then turn OFF
+        self.hl_timer_2 = self.create_timer(5.0, self.headlight_seq_step3)
+
+    def headlight_seq_step3(self):
+        if self.hl_timer_2:
+            self.hl_timer_2.cancel()
+            self.hl_timer_2 = None
+
+        self.current_headlight_mode = "OFF"
+        self.send_current_state()
+
+    def turn_off_headlight(self):
+        if self.hl_timer_1:
+            self.hl_timer_1.cancel()
+            self.hl_timer_1 = None
+        if self.hl_timer_2:
+            self.hl_timer_2.cancel()
+            self.hl_timer_2 = None
+
+        self.current_headlight_mode = "OFF"
+        self.send_current_state()
 
     # ------------------------------------------------------------------ #
     # Serial output                                                       #

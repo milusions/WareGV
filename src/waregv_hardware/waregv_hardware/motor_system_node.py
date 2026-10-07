@@ -94,7 +94,7 @@ class MotorSystemNode(Node):
         # Drop commands if disarmed or still in the 5-second arming wait period
         if not self.is_armed:
             return
-        if (time.monotonic() - self.arm_time) < 5.0:
+        if (time.monotonic() - self.arm_time) < 2.0:
             return
 
         # Clamp all inputs within hardware limits safely
