@@ -45,17 +45,6 @@ def _wait_for_topic(topic, timeout=180.0):
     )
 
 
-def _wait_for_tf(parent, child, timeout=120):
-    """Blocking probe: exits once the parent->child transform can actually be looked up."""
-    return ExecuteProcess(
-        cmd=["bash", "-c",
-             f"timeout {timeout} ros2 run tf2_ros tf2_echo {parent} {child} 2>&1 "
-             f"| grep -m1 -E 'Translation|At time'"],
-        output="log",
-        name=f"wait_tf_{parent}_{child}",
-    )
-
-
 def generate_launch_description():
     waregv_bringup_dir = get_package_share_directory("waregv_bringup")
     rosbridge_dir = get_package_share_directory("rosbridge_server")
@@ -249,9 +238,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    # odom -> lidar_link must be resolvable before SLAM starts
-    odom_tf_gate = _wait_for_tf("odom", "lidar_link")
-
     # =========================================================
     # Event-driven sequencing
     # =========================================================
@@ -273,9 +259,15 @@ def generate_launch_description():
                 twist_mux_node,
                 waregv_odometry,
                 waregv_controller,
-                odom_tf_gate,
                 TimerAction(
-                    period=8.0,
+                    period=10.0,
+                    actions=[
+                        _banner(5, "Mapping (delayed 10s for Lidar RPM & TF stability)"),
+                        waregv_mapping,
+                    ],
+                ),
+                TimerAction(
+                    period=15.0,
                     actions=[
                         _banner(6, "Suite & vision"),
                         waregv_suite,
@@ -283,7 +275,7 @@ def generate_launch_description():
                     ],
                 ),
                 TimerAction(
-                    period=13.0,
+                    period=20.0,
                     actions=[
                         _banner(7, "Bridges & user interfaces"),
                         rosbridge_node,
@@ -292,22 +284,12 @@ def generate_launch_description():
                     ],
                 ),
                 TimerAction(
-                    period=18.0,
+                    period=25.0,
                     actions=[
                         _banner(8, "Navigation"),
                         waregv_navigation,
                     ],
                 ),
-            ],
-        )
-    )
-
-    start_mapping = RegisterEventHandler(
-        OnProcessExit(
-            target_action=odom_tf_gate,
-            on_exit=[
-                _banner(5, "Mapping (starts after odom->lidar_link TF is live)"),
-                waregv_mapping,
             ],
         )
     )
@@ -326,6 +308,5 @@ def generate_launch_description():
             joint_states_gate,
             start_stage3,
             start_stage4,
-            start_mapping,
         ]
     )
